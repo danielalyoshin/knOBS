@@ -2,8 +2,11 @@
 //
 // knobs-smoke: checks the M0 runtime bootstrap end to end. Finds OBS, makes
 // sure the runtime copy is intact, loads obs.dll from it, starts libobs with
-// the two modules, optionally captures the default mic through a gain filter,
-// and shuts down, reporting each step.
+// the two modules and shuts down, reporting each step.
+//
+// Mic capture is opt-in (--capture-seconds). Without it the mic is never
+// opened. With it, captured audio stays in memory: only the frame count and
+// peak level are kept, and nothing is recorded or played back.
 
 #include <windows.h>
 #include <psapi.h>
@@ -54,7 +57,9 @@ Checks that knOBS can run the installed OBS's libobs from its runtime copy.
   --refresh-runtime       Recopy the runtime even if an intact copy exists.
   --list-files            Print the files the runtime copy needs.
   --video none|dummy      Start without video (default) or with the dummy canvas.
-  --capture-seconds <n>   Capture the default mic for n seconds (default 2; 0 skips).
+  --capture-seconds <n>   Opt in to capturing the default mic for n seconds through a
+                          gain filter. Off by default. Only the frame count and peak
+                          level are kept; nothing is recorded.
   --verbose               Echo the libobs log, including debug lines.
 )";
 
@@ -64,7 +69,7 @@ struct Options {
   bool refresh_runtime = false;
   bool list_files = false;
   VideoMode video = VideoMode::kNone;
-  double capture_seconds = 2.0;
+  double capture_seconds = 0;  // Mic capture is opt-in.
   bool verbose = false;
 };
 
@@ -300,8 +305,7 @@ void CheckCapture(const ObsApi& api, ObsSession& session, const Options& options
     Check(state.frames > 0, "audio",
           state.frames > 0
               ? std::format("{} frames in {:.1f} s after gain_filter, peak {}", state.frames, elapsed, level)
-              : "no audio from the default recording device (is one connected? "
-                "--capture-seconds 0 skips this)");
+              : "no audio from the default recording device (is one connected?)");
   }
 
   if (options.video == VideoMode::kDummy) {
@@ -432,9 +436,11 @@ int Run(const Options& options) {
                                               : "48 kHz stereo, dummy video 8x8 @ 1 fps");
       CheckModuleData(api, **session, copy->root);
       if (options.capture_seconds > 0) {
+        Report(Outcome::kNote, "mic",
+               std::format("opening the default recording device for {:g} s", options.capture_seconds));
         CheckCapture(api, **session, options);
       } else {
-        Report(Outcome::kNote, "audio", "capture skipped (--capture-seconds 0)");
+        Report(Outcome::kNote, "audio", "mic not opened (opt in with --capture-seconds <n>)");
       }
       CheckDllOrigin(copy->root, install->root);
 

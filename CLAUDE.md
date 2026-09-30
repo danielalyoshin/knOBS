@@ -18,7 +18,7 @@ cmake --build --preset debug  # or: release
 ctest --preset debug          # unit tests + smoke test (smoke skips if OBS isn't installed)
 ```
 
-`build\x64\Debug\knobs-smoke.exe --help` lists the smoke test's options: mic capture, `--video dummy`, `--list-files`, `--obs-dir`.
+`build\x64\Debug\knobs-smoke.exe --help` lists the smoke test's options: `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`). Don't open the mic without the user's go-ahead.
 
 ## Layout
 - `src/runtime/`: finding OBS, the runtime copy, loading `obs.dll` and its function table, the libobs session, and logging.

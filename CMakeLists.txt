@@ -50,7 +50,7 @@ target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
-# Needs OBS installed; exits with 77 (skipped) when it isn't. Capture is off so
-# the test doesn't depend on a microphone.
-add_test(NAME smoke COMMAND knobs-smoke --capture-seconds 0)
+# Needs OBS installed; exits with 77 (skipped) when it isn't. Never opens the
+# mic: capture is opt-in.
+add_test(NAME smoke COMMAND knobs-smoke)
 set_tests_properties(smoke PROPERTIES SKIP_RETURN_CODE 77)
