@@ -35,6 +35,12 @@ struct SessionOptions {
 // A started libobs with win-wasapi and obs-filters loaded. libobs is a
 // process-wide singleton, so there's at most one of these at a time.
 // `runtime` must outlive the session.
+//
+// Start, Shutdown and the destructor must run on the same thread.
+// obs_startup() initializes COM as a single-threaded apartment on its calling
+// thread and obs_shutdown() uninitializes COM on its calling thread
+// (obs-windows.c, initialize_com). Use a thread that isn't already in a
+// multithreaded apartment, or libobs logs a CoInitializeEx error.
 class ObsSession {
  public:
   static Result<std::unique_ptr<ObsSession>> Start(const ObsRuntime& runtime,
@@ -47,9 +53,13 @@ class ObsSession {
   // A loaded module by name (see kObsModules), or null.
   obs_module_t* module(std::string_view name) const;
 
-  // Waits until every source released so far is destroyed. libobs destroys
-  // sources on a background queue, and obs_shutdown() only waits for that
-  // queue when video is running (obs.c, obs_wait_for_destroy_queue).
+  // Waits until every source released so far is destroyed. The graphics and
+  // audio threads hold references to sources during each tick, so a source
+  // can reach its last release on one of them after the caller's release.
+  // This mirrors obs_wait_for_destroy_queue() (obs.c): let each running
+  // thread finish its tick, then wait for the destroy queue. The libobs
+  // function itself returns early when there's no video thread, and
+  // obs_shutdown() only waits through it.
   void DrainDestroyQueue();
 
   // Shuts libobs down. Returns the number of libobs allocations still live
@@ -57,10 +67,13 @@ class ObsSession {
   long Shutdown();
 
  private:
-  explicit ObsSession(const ObsRuntime& runtime) : runtime_(runtime) {}
+  explicit ObsSession(const ObsRuntime& runtime);
 
   const ObsRuntime& runtime_;
+  unsigned long thread_id_ = 0;  // The thread that called obs_startup().
   bool running_ = false;
+  bool audio_running_ = false;
+  bool video_running_ = false;
   std::vector<std::pair<std::string, obs_module_t*>> modules_;
 };
 

@@ -46,9 +46,17 @@ if (-not $Source) {
     }
 }
 
+# Windows PowerShell 5.1 turns redirected native stderr into a terminating
+# error under 'Stop', which would hide the message below.
+$ErrorActionPreference = 'Continue'
 $checkedOutTag = git -C $Source describe --tags --exact-match HEAD 2>$null
+$describeFailed = $LASTEXITCODE -ne 0
+$ErrorActionPreference = 'Stop'
+if ($describeFailed) {
+    throw "$Source isn't checked out at a tag; expected $Tag"
+}
 if ($checkedOutTag -ne $Tag) {
-    throw "$Source is at '$checkedOutTag', not tag $Tag"
+    throw "$Source is at tag '$checkedOutTag', not $Tag"
 }
 $commit = git -C $Source rev-parse HEAD
 $libobs = (Resolve-Path (Join-Path $Source 'libobs')).Path

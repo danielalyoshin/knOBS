@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "runtime/obs_session.h"
 
+#include <windows.h>
+
+#include <cassert>
 #include <format>
 
 #include "runtime/obs_layout.h"
@@ -49,6 +52,7 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
     return Error{std::format("libobs rejected the audio format ({} Hz, speaker layout {}).",
                              audio.samples_per_sec, static_cast<int>(audio.speakers))};
   }
+  session->audio_running_ = true;
 
   if (options.video == VideoMode::kDummy) {
     const std::string graphics_module(kGraphicsModule);
@@ -68,6 +72,7 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
       return Error{std::format("Couldn't start the dummy video canvas (obs_reset_video error {}).",
                                result)};
     }
+    session->video_running_ = true;
   }
 
   for (std::string_view name : kObsModules) {
@@ -87,6 +92,9 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
   return session;
 }
 
+ObsSession::ObsSession(const ObsRuntime& runtime)
+    : runtime_(runtime), thread_id_(GetCurrentThreadId()) {}
+
 ObsSession::~ObsSession() { Shutdown(); }
 
 obs_module_t* ObsSession::module(std::string_view name) const {
@@ -97,16 +105,26 @@ obs_module_t* ObsSession::module(std::string_view name) const {
 }
 
 void ObsSession::DrainDestroyQueue() {
+  const ObsApi& api = runtime_.api();
+  constexpr obs_task_t kNoop = [](void*) {};
+  // Each thread runs queued tasks after releasing that tick's source
+  // references (obs-video.c, obs-audio.c). Only wait on threads that exist, or
+  // the wait never ends.
+  if (video_running_) api.obs_queue_task(OBS_TASK_GRAPHICS, kNoop, nullptr, true);
+  if (audio_running_) api.obs_queue_task(OBS_TASK_AUDIO, kNoop, nullptr, true);
   // Runs after every destroy task queued before it.
-  runtime_.api().obs_queue_task(OBS_TASK_DESTROY, [](void*) {}, nullptr, true);
+  api.obs_queue_task(OBS_TASK_DESTROY, kNoop, nullptr, true);
 }
 
 long ObsSession::Shutdown() {
   const ObsApi& api = runtime_.api();
   if (running_) {
+    assert(GetCurrentThreadId() == thread_id_ && "obs_shutdown() must run on the obs_startup() thread");
     DrainDestroyQueue();
     api.obs_shutdown();
     running_ = false;
+    audio_running_ = false;
+    video_running_ = false;
     modules_.clear();
   }
   return api.bnum_allocs();

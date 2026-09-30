@@ -11,6 +11,28 @@
 #include "util/win_strings.h"
 
 namespace knobs::runtime {
+namespace {
+
+// Restores the working directory when a load fails, so a failed load doesn't
+// leave the process inside a runtime copy (which would also keep that folder
+// from being deleted).
+class WorkingDirectoryGuard {
+ public:
+  WorkingDirectoryGuard() {
+    std::error_code ec;
+    saved_ = std::filesystem::current_path(ec);
+  }
+  ~WorkingDirectoryGuard() {
+    if (armed_ && !saved_.empty()) SetCurrentDirectoryW(saved_.c_str());
+  }
+  void Keep() { armed_ = false; }
+
+ private:
+  std::filesystem::path saved_;
+  bool armed_ = true;
+};
+
+}  // namespace
 
 Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path& runtime_root) {
   const std::filesystem::path bin = BinDir(runtime_root);
@@ -18,15 +40,12 @@ Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path
   std::unique_ptr<ObsRuntime> runtime(new ObsRuntime());
   runtime->root_ = runtime_root;
 
-  if (!SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS)) {
-    return Error{std::format("Couldn't restrict the DLL search path: {}",
-                             DescribeWinError(GetLastError()))};
-  }
   runtime->dll_directory_ = AddDllDirectory(bin.c_str());
   if (!runtime->dll_directory_) {
     return Error{std::format("Couldn't add {} to the DLL search path: {}", ToUtf8(bin),
                              DescribeWinError(GetLastError()))};
   }
+  WorkingDirectoryGuard working_directory;
   if (!SetCurrentDirectoryW(bin.c_str())) {
     return Error{std::format("Couldn't switch to {}: {}", ToUtf8(bin),
                              DescribeWinError(GetLastError()))};
@@ -60,8 +79,7 @@ Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path
   if (api.obs_get_version) {
     runtime->version_ = ObsVersion::FromLibobs(api.obs_get_version());
     if (!IsSupportedObsVersion(runtime->version_)) {
-      return Error{std::format("OBS {} isn't supported. {} supports {}.", version_string,
-                               kDisplayName, DescribeSupportedObsVersions())};
+      return Error{UnsupportedObsMessage(version_string)};
     }
   }
   if (!missing.empty()) {
@@ -70,6 +88,7 @@ Result<std::unique_ptr<ObsRuntime>> ObsRuntime::Load(const std::filesystem::path
     return Error{std::format("OBS {} is missing {} function(s) {} needs: {}.", version_string,
                              missing.size(), kDisplayName, names)};
   }
+  working_directory.Keep();
   return runtime;
 }
 

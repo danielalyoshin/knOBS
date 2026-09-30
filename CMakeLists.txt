@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.25)
 project(knobs VERSION 0.0.1 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT MSVC)
-  message(FATAL_ERROR "knOBS v1 builds with MSVC for 64-bit Windows only.")
+  message(FATAL_ERROR "This project builds with MSVC for 64-bit Windows only.")
 endif()
 
 set(CMAKE_CXX_STANDARD 20)

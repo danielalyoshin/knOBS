@@ -37,9 +37,12 @@ struct RuntimeCopy {
 };
 
 // Makes sure <runtime_base>\<version> holds a complete copy of the install's
-// runtime files. Reuses an intact copy unless `force` is set; otherwise copies
-// into a staging folder and swaps it in, so an interrupted copy is never used.
-// Replacing a copy fails while a running knOBS has it loaded.
+// runtime files. Refuses unsupported OBS versions before copying anything.
+// Reuses the existing copy unless `force` is set or the copy no longer matches
+// the install (a file changed, or knOBS now needs different modules).
+// Otherwise copies into a staging folder, flushes it to disk and swaps it in,
+// so an interrupted copy is never used. Copies are serialized across
+// processes. Replacing a copy fails while a running knOBS has it loaded.
 Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install,
                                       const std::filesystem::path& runtime_base, bool force);
 

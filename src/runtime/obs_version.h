@@ -4,6 +4,7 @@
 #include <compare>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace knobs::runtime {
 
@@ -21,11 +22,11 @@ struct ObsVersion {
   static ObsVersion FromLibobs(uint32_t packed);
 };
 
-// The oldest supported version is the minor release the vendored headers come
-// from (third_party/libobs), so knOBS never calls into a libobs older than the
-// declarations it was compiled against. The cap is the next major: libobs
-// bumps the major for breaking API changes (obs-config.h). Only 32.2.2 has
-// actually been tested so far.
+// The floor is the minor release the vendored headers come from
+// (third_party/libobs, currently 32.2.2). Patch releases don't change the
+// libobs API (semantic versioning, obs-config.h), so 32.2.0 and 32.2.1 have
+// the same declarations. The cap is the next major, where libobs makes
+// breaking changes. Only 32.2.2 has actually been tested so far.
 inline constexpr ObsVersion kMinSupportedObs{32, 2, 0};
 inline constexpr ObsVersion kFirstUnsupportedObs{33, 0, 0};
 
@@ -33,5 +34,8 @@ bool IsSupportedObsVersion(const ObsVersion& version);
 
 // For messages, e.g. "OBS Studio 32.2 or a later 32.x release".
 std::string DescribeSupportedObsVersions();
+
+// "OBS <version_text> isn't supported. knOBS supports ..."
+std::string UnsupportedObsMessage(std::string_view version_text);
 
 }  // namespace knobs::runtime

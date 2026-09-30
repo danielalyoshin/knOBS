@@ -3,6 +3,7 @@
 
 #include <filesystem>
 #include <optional>
+#include <vector>
 
 #include "runtime/obs_version.h"
 #include "util/result.h"
@@ -21,9 +22,13 @@ struct ObsInstall {
 // what people tend to pick when browsing for it.
 Result<ObsInstall> InspectObsInstall(const std::filesystem::path& folder);
 
-// Finds OBS where the installer puts it: the folder recorded in the registry,
-// then the default Program Files folder. Steam and portable installs need
-// PickObsInstallFolder().
+// Existing folders where the installer puts OBS: the ones recorded in the
+// registry, then the default Program Files folder. Deduplicated; not
+// validated. Empty means OBS doesn't appear to be installed at all.
+std::vector<std::filesystem::path> ObsInstallCandidates();
+
+// The first candidate that passes InspectObsInstall(). Steam and portable
+// installs need PickObsInstallFolder().
 Result<ObsInstall> FindObsInstall();
 
 // Asks the user for the OBS folder. `owner` is an HWND or null. Returns

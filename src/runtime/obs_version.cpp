@@ -3,6 +3,8 @@
 
 #include <format>
 
+#include "app_info.h"
+
 namespace knobs::runtime {
 
 std::string ObsVersion::ToString() const { return std::format("{}.{}.{}", major, minor, patch); }
@@ -21,6 +23,11 @@ std::string DescribeSupportedObsVersions() {
                 "Update the wording below to match the new range");
   return std::format("OBS Studio {}.{} or a later {}.x release", kMinSupportedObs.major,
                      kMinSupportedObs.minor, kMinSupportedObs.major);
+}
+
+std::string UnsupportedObsMessage(std::string_view version_text) {
+  return std::format("OBS {} isn't supported. {} supports {}.", version_text, kDisplayName,
+                     DescribeSupportedObsVersions());
 }
 
 }  // namespace knobs::runtime

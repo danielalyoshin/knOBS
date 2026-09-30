@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <filesystem>
 #include <format>
@@ -16,6 +17,8 @@
 
 #include "runtime/obs_api.h"
 #include "runtime/obs_install.h"
+#include "runtime/obs_log.h"
+#include "runtime/obs_runtime.h"
 #include "runtime/obs_version.h"
 #include "runtime/pe_imports.h"
 #include "runtime/runtime_copy.h"
@@ -235,10 +238,122 @@ TEST(EnsureCopiesReusesAndRepairs) {
   auto forced = EnsureRuntimeCopy(install, base, true);
   CHECK(forced.ok() && !forced->reused);
 
+  // Replaced copies are moved aside and then removed.
+  for (const auto& entry : fs::directory_iterator(base)) {
+    CHECK(entry.path().filename() == L"32.2.2");
+  }
+
   // A different OBS version gets its own folder.
   const ObsInstall newer{install.root, {32, 3, 0}};
   auto other = EnsureRuntimeCopy(newer, base, false);
   CHECK(other.ok() && !other->reused && other->root == base / L"32.3.0");
+}
+
+TEST(EnsureRecopiesWhenInstallChanges) {
+  TempDir dir(L"changed");
+  const ObsInstall install{MakeFakeInstall(dir.path / L"obs"), {32, 2, 2}};
+  const fs::path base = dir.path / L"runtime";
+  CHECK(EnsureRuntimeCopy(install, base, false).ok());
+
+  // Same version, rebuilt obs.dll (e.g. a beta replaced by the final release,
+  // which has the same version resource). Same size, newer timestamp.
+  const fs::path dll = install.root / L"bin" / L"64bit" / L"obs.dll";
+  fs::last_write_time(dll, fs::last_write_time(dll) + std::chrono::hours(1));
+  auto again = EnsureRuntimeCopy(install, base, false);
+  CHECK(again.ok() && !again->reused);
+  auto settled = EnsureRuntimeCopy(install, base, false);
+  CHECK(settled.ok() && settled->reused);
+}
+
+TEST(EnsureRefusesUnsupportedVersions) {
+  TempDir dir(L"unsupported");
+  const fs::path base = dir.path / L"runtime";
+  for (const ObsVersion version : {ObsVersion{31, 1, 4}, ObsVersion{33, 0, 0}}) {
+    const ObsInstall install{MakeFakeInstall(dir.path / FromUtf8(version.ToString())), version};
+    auto copy = EnsureRuntimeCopy(install, base, false);
+    CHECK(!copy.ok());
+    CHECK(!copy.ok() && copy.error().find("isn't supported") != std::string::npos);
+  }
+  CHECK(!fs::exists(base) || fs::is_empty(base));
+}
+
+// --- Runtime load --------------------------------------------------------------
+
+TEST(FailedLoadRestoresWorkingDirectory) {
+  TempDir dir(L"load");
+  // A copy of this test binary stands in for obs.dll: it loads, but exports
+  // none of the libobs functions.
+  const fs::path root = MakeFakeInstall(dir.path / L"runtime");
+  const fs::path before = fs::current_path();
+  auto runtime = ObsRuntime::Load(root);
+  CHECK(!runtime.ok());
+  CHECK(!runtime.ok() && runtime.error().find("missing") != std::string::npos);
+  CHECK(fs::current_path() == before);
+}
+
+// --- Log -----------------------------------------------------------------------
+
+std::string ReadWhileOpen(const fs::path& file) {
+  // How an editor opens a file another program is writing.
+  HANDLE handle = CreateFileW(file.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return "<sharing violation>";
+  char buffer[4096];
+  DWORD read = 0;
+  ReadFile(handle, buffer, sizeof(buffer), &read, nullptr);
+  CloseHandle(handle);
+  return std::string(buffer, read);
+}
+
+TEST(LogIsReadableWhileOpenAndAppends) {
+  TempDir dir(L"log");
+  const fs::path file = dir.path / L"run.txt";
+  {
+    auto log = ObsLog::Open(file);
+    CHECK(log.ok());
+    if (!log) return;
+    (*log)->Write(LOG_INFO, "first run");
+    CHECK(ReadWhileOpen(file).find("first run") != std::string::npos);
+  }
+  {
+    auto log = ObsLog::Open(file);  // Same name, e.g. two runs in one second.
+    CHECK(log.ok());
+    if (!log) return;
+    (*log)->Write(LOG_INFO, "second run");
+  }
+  const std::string contents = ReadWhileOpen(file);
+  CHECK(contents.find("first run") != std::string::npos);
+  CHECK(contents.find("second run") != std::string::npos);
+}
+
+TEST(LogKeepsRecentProblemsOnly) {
+  TempDir dir(L"problems");
+  auto log = ObsLog::Open(dir.path / L"run.txt");
+  CHECK(log.ok());
+  if (!log) return;
+  (*log)->Write(LOG_INFO, "not a problem");
+  for (int i = 0; i < 120; ++i) (*log)->Write(LOG_WARNING, std::format("warning {}", i));
+  CHECK((*log)->problem_count() == 120);
+  const auto recent = (*log)->RecentProblems();
+  CHECK(recent.size() == ObsLog::kRecentProblems);
+  CHECK(!recent.empty() && recent.back().ends_with("warning 119"));
+}
+
+TEST(PruneLogsKeepsNewest) {
+  TempDir dir(L"prune");
+  const auto now = fs::file_time_type::clock::now();
+  for (int i = 0; i < 5; ++i) {
+    const fs::path file = dir.path / std::format(L"smoke {}.txt", i);
+    WriteFile(file, "log");
+    fs::last_write_time(file, now - std::chrono::minutes(10 - i));
+  }
+  WriteFile(dir.path / L"other.txt", "not a smoke log");
+  PruneLogs(dir.path, L"smoke ", 2);
+  CHECK(!fs::exists(dir.path / L"smoke 0.txt"));
+  CHECK(!fs::exists(dir.path / L"smoke 2.txt"));
+  CHECK(fs::exists(dir.path / L"smoke 3.txt"));
+  CHECK(fs::exists(dir.path / L"smoke 4.txt"));
+  CHECK(fs::exists(dir.path / L"other.txt"));
 }
 
 }  // namespace

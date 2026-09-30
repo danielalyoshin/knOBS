@@ -48,20 +48,26 @@ constexpr int kExitFail = 1;
 constexpr int kExitUsage = 2;
 constexpr int kExitSkip = 77;  // CTest SKIP_RETURN_CODE: OBS isn't installed.
 
-constexpr char kUsage[] = R"(Usage: knobs-smoke [options]
+constexpr double kMaxCaptureSeconds = 60;
+constexpr size_t kKeptLogs = 20;
 
-Checks that knOBS can run the installed OBS's libobs from its runtime copy.
+std::string Usage() {
+  return std::format(R"(Usage: knobs-smoke [options]
+
+Checks that {} can run the installed OBS's libobs from its runtime copy.
 
   --obs-dir <folder>      Use this OBS install instead of searching for one.
   --pick-obs-dir          Choose the OBS install with a folder picker.
   --refresh-runtime       Recopy the runtime even if an intact copy exists.
   --list-files            Print the files the runtime copy needs.
   --video none|dummy      Start without video (default) or with the dummy canvas.
-  --capture-seconds <n>   Opt in to capturing the default mic for n seconds through a
-                          gain filter. Off by default. Only the frame count and peak
-                          level are kept; nothing is recorded.
+  --capture-seconds <n>   Opt in to capturing the default mic for n seconds (at most
+                          {:g}) through a gain filter. Off by default. Only the frame
+                          count and peak level are kept; nothing is recorded.
   --verbose               Echo the libobs log, including debug lines.
-)";
+)",
+                     kDisplayName, kMaxCaptureSeconds);
+}
 
 struct Options {
   std::optional<fs::path> obs_dir;
@@ -94,7 +100,10 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--capture-seconds" && value) {
       wchar_t* end = nullptr;
       options.capture_seconds = std::wcstod(value, &end);
-      if (*end != L'\0' || !(options.capture_seconds >= 0)) return std::nullopt;
+      if (*end != L'\0' || !std::isfinite(options.capture_seconds) ||
+          options.capture_seconds < 0 || options.capture_seconds > kMaxCaptureSeconds) {
+        return std::nullopt;
+      }
       ++i;
     } else if (arg == L"--verbose") {
       options.verbose = true;
@@ -238,7 +247,6 @@ struct CaptureState {
   std::mutex mutex;
   uint64_t frames = 0;
   float peak = 0;
-  std::atomic<bool> activated = false;
 };
 
 void OnAudio(void* param, obs_source_t*, const audio_data* audio, bool) {
@@ -254,12 +262,8 @@ void OnAudio(void* param, obs_source_t*, const audio_data* audio, bool) {
   state->peak = std::max(state->peak, peak);
 }
 
-void OnActivate(void* param, calldata_t*) {
-  static_cast<CaptureState*>(param)->activated = true;
-}
-
-// Captures the default recording device through a gain filter with no video
-// pipeline (or the dummy one), and watches for the source's activate signal.
+// Captures the default recording device through a gain filter, with no video
+// pipeline or the dummy one. Only runs when the user opted in.
 void CheckCapture(const ObsApi& api, ObsSession& session, const Options& options) {
   obs_data_t* mic_settings = api.obs_data_create();
   api.obs_data_set_string(mic_settings, "device_id", "default");
@@ -279,8 +283,6 @@ void CheckCapture(const ObsApi& api, ObsSession& session, const Options& options
   }
 
   CaptureState state;
-  signal_handler_t* signals = api.obs_source_get_signal_handler(mic);
-  api.signal_handler_connect(signals, "activate", OnActivate, &state);
   api.obs_source_filter_add(mic, gain);
   api.obs_source_add_audio_capture_callback(mic, OnAudio, &state);
   api.obs_source_inc_active(mic);
@@ -291,7 +293,6 @@ void CheckCapture(const ObsApi& api, ObsSession& session, const Options& options
 
   api.obs_source_dec_active(mic);
   api.obs_source_remove_audio_capture_callback(mic, OnAudio, &state);
-  api.signal_handler_disconnect(signals, "activate", OnActivate, &state);
   api.obs_source_filter_remove(mic, gain);
   api.obs_source_release(gain);
   api.obs_source_release(mic);
@@ -308,22 +309,53 @@ void CheckCapture(const ObsApi& api, ObsSession& session, const Options& options
               : "no audio from the default recording device (is one connected?)");
   }
 
-  if (options.video == VideoMode::kDummy) {
-    Check(state.activated, "activation",
-          state.activated ? "activate fired from the video tick"
-                          : "activate never fired, even with the dummy video tick");
-  } else {
-    Report(Outcome::kNote, "activation",
-           state.activated ? "activate fired without video (unexpected)"
-                           : "activate never fires without a video tick, so win-wasapi's "
-                             "reconnect thread doesn't run");
-  }
-
   Report(Outcome::kNote, "cost",
          std::format("{:.2f}% of one core while capturing, working set {:.1f} MB, private "
                      "{:.1f} MB, {} threads",
                      100.0 * (after.cpu_seconds - before.cpu_seconds) / elapsed,
                      Megabytes(after.working_set), Megabytes(after.private_bytes), after.threads));
+}
+
+void OnActivate(void* param, calldata_t*) { static_cast<std::atomic<bool>*>(param)->store(true); }
+
+// Whether sources get their activate callback, which libobs only fires from
+// the video tick. Uses libobs's built-in audio_line source, which opens no
+// device.
+void CheckActivation(const ObsApi& api, ObsSession& session, VideoMode video) {
+  obs_source_t* source = api.obs_source_create_private("audio_line", "smoke activation", nullptr);
+  if (!source) {
+    Check(false, "activation", "couldn't create an audio_line source");
+    return;
+  }
+  std::atomic<bool> activated = false;
+  signal_handler_t* signals = api.obs_source_get_signal_handler(source);
+  api.signal_handler_connect(signals, "activate", OnActivate, &activated);
+  api.obs_source_inc_active(source);
+
+  // The dummy canvas ticks once a second. Without video, wait longer than a
+  // tick would take, to show that none comes.
+  using namespace std::chrono_literals;
+  const auto deadline =
+      std::chrono::steady_clock::now() + (video == VideoMode::kDummy ? 3000ms : 1500ms);
+  while (!activated && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(50ms);
+  }
+
+  api.obs_source_dec_active(source);
+  api.signal_handler_disconnect(signals, "activate", OnActivate, &activated);
+  api.obs_source_release(source);
+  session.DrainDestroyQueue();
+
+  if (video == VideoMode::kDummy) {
+    Check(activated, "activation",
+          activated ? "activate fired from the video tick"
+                    : "activate never fired, even with the dummy video tick");
+  } else {
+    Report(Outcome::kNote, "activation",
+           activated ? "activate fired without video (unexpected)"
+                     : "activate never fires without a video tick, so win-wasapi's "
+                       "reconnect thread wouldn't run");
+  }
 }
 
 // The invariant: nothing is loaded from the OBS install folder.
@@ -373,8 +405,15 @@ int Run(const Options& options) {
   }
   auto install = chosen ? InspectObsInstall(*chosen) : FindObsInstall();
   if (!install) {
+    // Skip (for CTest) only when OBS isn't installed at all. A broken install
+    // is a failure.
+    if (!explicit_dir && ObsInstallCandidates().empty()) {
+      Report(Outcome::kNote, "find OBS", install.error());
+      Print("SKIP (OBS isn't installed)\n");
+      return kExitSkip;
+    }
     Check(false, "find OBS", install.error());
-    return explicit_dir ? kExitFail : kExitSkip;
+    return kExitFail;
   }
   Check(true, "find OBS", std::format("OBS {} in {}", install->version.ToString(), ToUtf8(install->root)));
 
@@ -401,6 +440,7 @@ int Run(const Options& options) {
         std::format("{} ({} {} files, {:.1f} MB)", ToUtf8(copy->root), copy->reused ? "reused," : "copied",
                     copy->file_count, Megabytes(copy->total_bytes)));
 
+  PruneLogs(dirs->Logs(), L"smoke ", kKeptLogs - 1);  // Room for this run's log.
   auto log = ObsLog::Open(dirs->Logs() / (L"smoke " + Timestamp() + L".txt"));
   if (!log) {
     Check(false, "log", log.error());
@@ -435,6 +475,7 @@ int Run(const Options& options) {
             options.video == VideoMode::kNone ? "48 kHz stereo, no video (no obs_reset_video)"
                                               : "48 kHz stereo, dummy video 8x8 @ 1 fps");
       CheckModuleData(api, **session, copy->root);
+      CheckActivation(api, **session, options.video);
       if (options.capture_seconds > 0) {
         Report(Outcome::kNote, "mic",
                std::format("opening the default recording device for {:g} s", options.capture_seconds));
@@ -451,10 +492,13 @@ int Run(const Options& options) {
     }
   }
 
-  const auto problems = (*log)->Problems();
   Report(Outcome::kNote, "libobs log",
-         std::format("{} ({} warnings/errors)", ToUtf8((*log)->path()), problems.size()));
-  for (size_t i = 0; i < problems.size() && i < 20; ++i) Print(std::format("         {}\n", problems[i]));
+         std::format("{} ({} warnings/errors)", ToUtf8((*log)->path()), (*log)->problem_count()));
+  const auto problems = (*log)->RecentProblems();
+  const size_t shown = std::min<size_t>(problems.size(), 20);
+  for (size_t i = problems.size() - shown; i < problems.size(); ++i) {
+    Print(std::format("         {}\n", problems[i]));
+  }
 
   Print(g_failed ? "FAIL\n" : "PASS\n");
   return g_failed ? kExitFail : kExitPass;
@@ -463,16 +507,19 @@ int Run(const Options& options) {
 }  // namespace
 
 int wmain(int argc, wchar_t** argv) {
+  // Plain LoadLibrary calls skip PATH and the working directory; see
+  // ObsRuntime::Load.
+  SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   SetConsoleOutputCP(CP_UTF8);
   for (int i = 1; i < argc; ++i) {
     if (argv[i] == std::wstring_view(L"--help") || argv[i] == std::wstring_view(L"-h")) {
-      Print(kUsage);
+      Print(Usage());
       return kExitPass;
     }
   }
   const auto options = ParseArgs(argc, argv);
   if (!options) {
-    Print(kUsage);
+    Print(Usage());
     return kExitUsage;
   }
   return Run(*options);

@@ -92,27 +92,37 @@ Result<ObsInstall> InspectObsInstall(const fs::path& folder) {
   return ObsInstall{root, *version};
 }
 
-Result<ObsInstall> FindObsInstall() {
+std::vector<fs::path> ObsInstallCandidates() {
   // The OBS installer records its folder as the default value of this key.
   constexpr const wchar_t* kInstallerKey = L"SOFTWARE\\OBS Studio";
-  std::vector<fs::path> candidates;
+  std::vector<fs::path> found;
   const std::pair<HKEY, DWORD> registry_views[] = {
       {HKEY_LOCAL_MACHINE, RRF_SUBKEY_WOW6464KEY},
       {HKEY_LOCAL_MACHINE, RRF_SUBKEY_WOW6432KEY},
       {HKEY_CURRENT_USER, 0},
   };
   for (const auto& [hive, view] : registry_views) {
-    if (auto path = ReadRegistryPath(hive, kInstallerKey, view)) candidates.push_back(*path);
+    if (auto path = ReadRegistryPath(hive, kInstallerKey, view)) found.push_back(*path);
   }
-  if (auto program_files = ProgramFilesDir()) candidates.push_back(*program_files / L"obs-studio");
+  if (auto program_files = ProgramFilesDir()) found.push_back(*program_files / L"obs-studio");
 
-  std::vector<std::string> tried;
+  std::vector<fs::path> candidates;
+  std::vector<std::string> seen;
+  for (const fs::path& path : found) {
+    std::error_code ec;
+    std::string key = AsciiLower(ToUtf8(path.lexically_normal()));
+    if (!fs::is_directory(path, ec) || std::find(seen.begin(), seen.end(), key) != seen.end()) {
+      continue;
+    }
+    seen.push_back(std::move(key));
+    candidates.push_back(path);
+  }
+  return candidates;
+}
+
+Result<ObsInstall> FindObsInstall() {
   std::string failures;
-  for (const fs::path& candidate : candidates) {
-    std::string key = AsciiLower(ToUtf8(candidate.lexically_normal()));
-    if (std::find(tried.begin(), tried.end(), key) != tried.end()) continue;
-    tried.push_back(std::move(key));
-
+  for (const fs::path& candidate : ObsInstallCandidates()) {
     auto install = InspectObsInstall(candidate);
     if (install) return install;
     failures += "\n  " + install.error();
@@ -133,7 +143,10 @@ std::optional<fs::path> PickObsInstallFolder(void* owner) {
                                    IID_PPV_ARGS(&dialog)))) {
       FILEOPENDIALOGOPTIONS options = 0;
       dialog->GetOptions(&options);
-      dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST);
+      // FOS_NOCHANGEDIR: libobs resolves its data files against the working
+      // directory (see ObsRuntime::Load), so the dialog mustn't move it.
+      dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST |
+                         FOS_NOCHANGEDIR);
       dialog->SetTitle(L"Choose your OBS Studio folder");
       ComPtr<IShellItem> item;
       if (SUCCEEDED(dialog->Show(static_cast<HWND>(owner))) &&
