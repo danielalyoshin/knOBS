@@ -23,7 +23,10 @@ add_library(libobs_headers INTERFACE)
 target_include_directories(libobs_headers SYSTEM INTERFACE third_party/libobs)
 
 add_library(knobs_runtime STATIC
+  src/audio/audio_devices.cpp
+  src/audio/live_chain.cpp
   src/runtime/obs_api.cpp
+  src/runtime/obs_host.cpp
   src/runtime/obs_install.cpp
   src/runtime/obs_log.cpp
   src/runtime/obs_runtime.cpp
@@ -32,6 +35,7 @@ add_library(knobs_runtime STATIC
   src/runtime/pe_imports.cpp
   src/runtime/runtime_copy.cpp
   src/util/app_dirs.cpp
+  src/util/json.cpp
   src/util/win_strings.cpp
 )
 target_include_directories(knobs_runtime PUBLIC src)
@@ -40,17 +44,35 @@ target_link_libraries(knobs_runtime
   PRIVATE version shell32 ole32
 )
 
+# Shared by the dev tools and their unit tests; not part of the app.
+add_library(knobs_tools STATIC
+  tools/common/console.cpp
+  tools/common/envelope.cpp
+  tools/common/push_source.cpp
+  tools/common/sha256.cpp
+  tools/common/wav.cpp
+)
+target_include_directories(knobs_tools PUBLIC tools)
+target_link_libraries(knobs_tools PUBLIC knobs_runtime PRIVATE bcrypt)
+
 add_executable(knobs-smoke tools/smoke/smoke_main.cpp)
-target_link_libraries(knobs-smoke PRIVATE knobs_runtime psapi)
+target_link_libraries(knobs-smoke PRIVATE knobs_tools psapi)
+
+add_executable(knobs-harness tools/harness/harness_main.cpp tools/harness/test_signal.cpp)
+target_link_libraries(knobs-harness PRIVATE knobs_tools)
+
+add_executable(knobs-live tools/live/live_main.cpp tools/live/endpoints.cpp)
+target_link_libraries(knobs-live PRIVATE knobs_tools ole32)
 
 add_executable(knobs-tests tests/unit_tests.cpp)
-target_link_libraries(knobs-tests PRIVATE knobs_runtime delayimp)
+target_link_libraries(knobs-tests PRIVATE knobs_tools delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
-# Needs OBS installed; exits with 77 (skipped) when it isn't. Never opens the
-# mic: capture is opt-in.
+# The tests below need OBS installed and exit with 77 (skipped) when it isn't.
+# Neither opens the mic or any other audio device.
 add_test(NAME smoke COMMAND knobs-smoke)
-set_tests_properties(smoke PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME harness COMMAND knobs-harness --runs 3)
+set_tests_properties(smoke harness PROPERTIES SKIP_RETURN_CODE 77)

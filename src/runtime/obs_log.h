@@ -67,4 +67,9 @@ class ObsLog {
 // the newest `keep`.
 void PruneLogs(const std::filesystem::path& dir, std::wstring_view prefix, size_t keep);
 
+// Opens "<prefix><local date and time>.txt" in `dir`, first pruning older
+// logs with that prefix so that `keep` remain, counting the new one.
+Result<std::unique_ptr<ObsLog>> OpenNewLog(const std::filesystem::path& dir,
+                                           std::wstring_view prefix, size_t keep);
+
 }  // namespace knobs::runtime

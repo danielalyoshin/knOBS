@@ -53,6 +53,8 @@ class ObsSession {
   // A loaded module by name (see kObsModules), or null.
   obs_module_t* module(std::string_view name) const;
 
+  const SessionOptions& options() const { return options_; }
+
   // Waits until every source released so far is destroyed. The graphics and
   // audio threads hold references to sources during each tick, so a source
   // can reach its last release on one of them after the caller's release.
@@ -67,9 +69,10 @@ class ObsSession {
   long Shutdown();
 
  private:
-  explicit ObsSession(const ObsRuntime& runtime);
+  ObsSession(const ObsRuntime& runtime, const SessionOptions& options);
 
   const ObsRuntime& runtime_;
+  SessionOptions options_;
   unsigned long thread_id_ = 0;  // The thread that called obs_startup().
   bool running_ = false;
   bool audio_running_ = false;

@@ -41,7 +41,7 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
     return Error{std::format("Couldn't create {}.", ToUtf8(options.module_config_dir))};
   }
 
-  std::unique_ptr<ObsSession> session(new ObsSession(runtime));
+  std::unique_ptr<ObsSession> session(new ObsSession(runtime, options));
   if (!api.obs_startup(kLocale, ToObsPath(options.module_config_dir).c_str(), nullptr)) {
     return Error{"libobs failed to start (obs_startup). The log has details."};
   }
@@ -92,8 +92,8 @@ Result<std::unique_ptr<ObsSession>> ObsSession::Start(const ObsRuntime& runtime,
   return session;
 }
 
-ObsSession::ObsSession(const ObsRuntime& runtime)
-    : runtime_(runtime), thread_id_(GetCurrentThreadId()) {}
+ObsSession::ObsSession(const ObsRuntime& runtime, const SessionOptions& options)
+    : runtime_(runtime), options_(options), thread_id_(GetCurrentThreadId()) {}
 
 ObsSession::~ObsSession() { Shutdown(); }
 

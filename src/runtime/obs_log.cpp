@@ -97,4 +97,13 @@ void PruneLogs(const std::filesystem::path& dir, std::wstring_view prefix, size_
   for (size_t i = 0; i + keep < logs.size(); ++i) std::filesystem::remove(logs[i].second, ec);
 }
 
+Result<std::unique_ptr<ObsLog>> OpenNewLog(const std::filesystem::path& dir,
+                                           std::wstring_view prefix, size_t keep) {
+  PruneLogs(dir, prefix, keep > 0 ? keep - 1 : 0);
+  SYSTEMTIME t;
+  GetLocalTime(&t);
+  return ObsLog::Open(dir / std::format(L"{}{:04}-{:02}-{:02} {:02}-{:02}-{:02}.txt", prefix, t.wYear,
+                                        t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond));
+}
+
 }  // namespace knobs::runtime

@@ -36,19 +36,43 @@ namespace knobs::runtime {
   X(obs_find_module_file)                     \
   X(obs_module_get_locale_string)             \
   X(obs_find_data_file)                       \
-  /* Sources */                               \
+  /* Settings data */                         \
   X(obs_data_create)                          \
+  X(obs_data_create_from_json)                \
   X(obs_data_release)                         \
   X(obs_data_set_string)                      \
   X(obs_data_set_double)                      \
+  X(obs_data_set_int)                         \
+  /* Sources */                               \
+  X(obs_register_source_s)                    \
   X(obs_source_create_private)                \
+  X(obs_load_private_source)                  \
   X(obs_source_release)                       \
+  X(obs_source_get_id)                        \
+  X(obs_source_get_name)                      \
+  X(obs_source_get_output_flags)              \
+  X(obs_source_get_volume)                    \
+  X(obs_source_get_balance_value)             \
+  X(obs_source_get_flags)                     \
+  X(obs_source_enabled)                       \
   X(obs_source_filter_add)                    \
   X(obs_source_filter_remove)                 \
+  X(obs_source_enum_filters)                  \
   X(obs_source_inc_active)                    \
   X(obs_source_dec_active)                    \
+  X(obs_source_output_audio)                  \
   X(obs_source_add_audio_capture_callback)    \
   X(obs_source_remove_audio_capture_callback) \
+  X(obs_get_source_properties)                \
+  X(obs_properties_get)                       \
+  X(obs_properties_destroy)                   \
+  X(obs_property_list_item_count)             \
+  X(obs_property_list_item_name)              \
+  X(obs_property_list_item_string)            \
+  /* Monitoring */                            \
+  X(obs_enum_audio_monitoring_devices)        \
+  X(obs_set_audio_monitoring_device)          \
+  X(obs_source_set_monitoring_type)           \
   /* Signals */                               \
   X(obs_source_get_signal_handler)            \
   X(signal_handler_connect)                   \

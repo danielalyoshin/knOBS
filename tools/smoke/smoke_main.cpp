@@ -28,6 +28,7 @@
 #include <vector>
 
 #include "app_info.h"
+#include "common/console.h"
 #include "runtime/obs_install.h"
 #include "runtime/obs_layout.h"
 #include "runtime/obs_log.h"
@@ -41,12 +42,8 @@ namespace {
 
 using namespace knobs;
 using namespace knobs::runtime;
+using namespace knobs::tools;
 namespace fs = std::filesystem;
-
-constexpr int kExitPass = 0;
-constexpr int kExitFail = 1;
-constexpr int kExitUsage = 2;
-constexpr int kExitSkip = 77;  // CTest SKIP_RETURN_CODE: OBS isn't installed.
 
 constexpr double kMaxCaptureSeconds = 60;
 constexpr size_t kKeptLogs = 20;
@@ -112,27 +109,6 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     }
   }
   return options;
-}
-
-// --- Reporting ---------------------------------------------------------------
-
-bool g_failed = false;
-
-void Print(std::string_view text) {
-  fwrite(text.data(), 1, text.size(), stdout);
-  fflush(stdout);
-}
-
-enum class Outcome { kOk, kFail, kNote };
-
-void Report(Outcome outcome, std::string_view step, std::string_view detail) {
-  const char* tag = outcome == Outcome::kOk ? "ok" : outcome == Outcome::kFail ? "FAIL" : "--";
-  if (outcome == Outcome::kFail) g_failed = true;
-  Print(std::format("[{:<4}] {:<18} {}\n", tag, step, detail));
-}
-
-void Check(bool ok, std::string_view step, std::string_view detail) {
-  Report(ok ? Outcome::kOk : Outcome::kFail, step, detail);
 }
 
 double Megabytes(uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0); }
@@ -369,13 +345,6 @@ void CheckDllOrigin(const fs::path& runtime_root, const fs::path& install_root) 
             : std::format("loaded from the OBS install: {}", loaded.from_install.front()));
 }
 
-std::wstring Timestamp() {
-  SYSTEMTIME t;
-  GetLocalTime(&t);
-  return std::format(L"{:04}-{:02}-{:02} {:02}-{:02}-{:02}", t.wYear, t.wMonth, t.wDay, t.wHour,
-                     t.wMinute, t.wSecond);
-}
-
 // Keeps libobs logging into `log` until the session is gone.
 struct LogAttachment {
   const ObsApi& api;
@@ -440,8 +409,7 @@ int Run(const Options& options) {
         std::format("{} ({} {} files, {:.1f} MB)", ToUtf8(copy->root), copy->reused ? "reused," : "copied",
                     copy->file_count, Megabytes(copy->total_bytes)));
 
-  PruneLogs(dirs->Logs(), L"smoke ", kKeptLogs - 1);  // Room for this run's log.
-  auto log = ObsLog::Open(dirs->Logs() / (L"smoke " + Timestamp() + L".txt"));
+  auto log = OpenNewLog(dirs->Logs(), L"smoke ", kKeptLogs);
   if (!log) {
     Check(false, "log", log.error());
     return kExitFail;
@@ -500,8 +468,8 @@ int Run(const Options& options) {
     Print(std::format("         {}\n", problems[i]));
   }
 
-  Print(g_failed ? "FAIL\n" : "PASS\n");
-  return g_failed ? kExitFail : kExitPass;
+  Print(AnyFailed() ? "FAIL\n" : "PASS\n");
+  return AnyFailed() ? kExitFail : kExitPass;
 }
 
 }  // namespace

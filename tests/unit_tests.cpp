@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -15,6 +17,11 @@
 #include <string_view>
 #include <vector>
 
+#include "audio/audio_devices.h"
+#include "audio/live_chain.h"
+#include "common/envelope.h"
+#include "common/sha256.h"
+#include "common/wav.h"
 #include "runtime/obs_api.h"
 #include "runtime/obs_install.h"
 #include "runtime/obs_log.h"
@@ -22,12 +29,14 @@
 #include "runtime/obs_version.h"
 #include "runtime/pe_imports.h"
 #include "runtime/runtime_copy.h"
+#include "util/json.h"
 #include "util/win_strings.h"
 
 namespace {
 
 using namespace knobs;
 using namespace knobs::runtime;
+using namespace knobs::tools;
 namespace fs = std::filesystem;
 
 struct TestCase {
@@ -354,6 +363,180 @@ TEST(PruneLogsKeepsNewest) {
   CHECK(fs::exists(dir.path / L"smoke 3.txt"));
   CHECK(fs::exists(dir.path / L"smoke 4.txt"));
   CHECK(fs::exists(dir.path / L"other.txt"));
+}
+
+TEST(OpenNewLogPrunesToKeep) {
+  TempDir dir(L"newlog");
+  for (int i = 0; i < 3; ++i) WriteFile(dir.path / std::format(L"live {}.txt", i), "log");
+  auto log = OpenNewLog(dir.path, L"live ", 2);
+  CHECK(log.ok());
+  size_t count = 0;
+  for (const auto& entry : fs::directory_iterator(dir.path)) {
+    if (entry.path().filename().native().starts_with(L"live ")) ++count;
+  }
+  CHECK(count == 2);
+}
+
+// --- JSON ----------------------------------------------------------------------
+
+TEST(JsonQuoteEscapes) {
+  CHECK(JsonQuote("plain") == "\"plain\"");
+  CHECK(JsonQuote("a\"b\\c") == "\"a\\\"b\\\\c\"");
+  CHECK(JsonQuote("tab\tnew\n") == "\"tab\\u0009new\\u000a\"");
+  CHECK(JsonQuote("\xC3\xA9") == "\"\xC3\xA9\"");  // UTF-8 passes through.
+}
+
+TEST(MicSourceJsonQuotesTheDevice) {
+  const std::string json = audio::MicWithGainSourceJson("{0.0.1}.{\"odd\"}", -3.5);
+  CHECK(json.find(R"("device_id": "{0.0.1}.{\"odd\"}")") != std::string::npos);
+  CHECK(json.find(R"("db": -3.5)") != std::string::npos);
+  CHECK(json.find(R"("id": "gain_filter")") != std::string::npos);
+}
+
+// --- Devices -------------------------------------------------------------------
+
+TEST(FindDeviceByIdOrName) {
+  const std::vector<audio::AudioDevice> devices = {
+      {"Default", "default"},
+      {"Analogue 1/2 (Audient iD4)", "{a}"},
+      {"Loop-back 1/2 (Audient iD4)", "{b}"},
+      {"CABLE Input (VB-Audio Virtual Cable)", "{c}"},
+      {"CABLE In 16ch (VB-Audio Virtual Cable)", "{d}"},
+  };
+  CHECK(audio::FindDevice(devices, "{b}", "mic").ok() && audio::FindDevice(devices, "{b}", "mic")->id == "{b}");
+  CHECK(audio::FindDevice(devices, "default", "mic")->name == "Default");
+  CHECK(audio::FindDevice(devices, "cable input", "output")->id == "{c}");
+  CHECK(audio::FindDevice(devices, "analogue", "mic")->id == "{a}");
+
+  const auto ambiguous = audio::FindDevice(devices, "iD4", "mic");
+  CHECK(!ambiguous.ok() && ambiguous.error().find("Several") != std::string::npos);
+  CHECK(!audio::FindDevice(devices, "Scarlett", "mic").ok());
+}
+
+// --- WAV -----------------------------------------------------------------------
+
+TEST(WavRoundTrips) {
+  TempDir dir(L"wav");
+  const FloatAudio audio{48000, 2, {0.0f, -1.0f, 0.5f, 0.25f, 1e-30f, -0.0f}};
+  CHECK(WriteFloatWav(dir.path / L"a.wav", audio).ok());
+  auto read = ReadFloatWav(dir.path / L"a.wav");
+  CHECK(read.ok());
+  if (!read) return;
+  CHECK(read->sample_rate == 48000 && read->channels == 2 && read->frames() == 3);
+  CHECK(std::memcmp(read->samples.data(), audio.samples.data(), audio.samples.size() * sizeof(float)) == 0);
+}
+
+// A header with the given format tag and bit depth, then `data_bytes` of data.
+std::string WavBytes(uint16_t tag, uint16_t bits, uint16_t channels, uint32_t data_bytes, bool extensible_float) {
+  std::string fmt;
+  auto put = [](std::string& s, auto value) { s.append(reinterpret_cast<const char*>(&value), sizeof(value)); };
+  put(fmt, tag);
+  put(fmt, channels);
+  put(fmt, uint32_t{48000});
+  put(fmt, uint32_t{48000u * channels * bits / 8});
+  put(fmt, static_cast<uint16_t>(channels * bits / 8));
+  put(fmt, bits);
+  if (tag == 0xFFFE) {
+    put(fmt, uint16_t{22});
+    put(fmt, bits);
+    put(fmt, uint32_t{3});
+    const uint8_t guid[16] = {static_cast<uint8_t>(extensible_float ? 3 : 1), 0, 0, 0, 0, 0, 0x10, 0,
+                              0x80, 0, 0, 0xAA, 0, 0x38, 0x9B, 0x71};
+    fmt.append(reinterpret_cast<const char*>(guid), sizeof(guid));
+  }
+  std::string out = "RIFF";
+  put(out, static_cast<uint32_t>(4 + 8 + fmt.size() + 8 + data_bytes));
+  out += "WAVEfmt ";
+  put(out, static_cast<uint32_t>(fmt.size()));
+  out += fmt;
+  out += "data";
+  put(out, data_bytes);
+  out.append(data_bytes, '\0');
+  return out;
+}
+
+TEST(WavAcceptsExtensibleFloatOnly) {
+  TempDir dir(L"wavfmt");
+  WriteFile(dir.path / L"ext.wav", WavBytes(0xFFFE, 32, 1, 16, true));
+  auto ext = ReadFloatWav(dir.path / L"ext.wav");
+  CHECK(ext.ok() && ext->channels == 1 && ext->frames() == 4);
+
+  WriteFile(dir.path / L"pcm16.wav", WavBytes(1, 16, 2, 16, false));
+  auto pcm = ReadFloatWav(dir.path / L"pcm16.wav");
+  CHECK(!pcm.ok() && pcm.error().find("32-bit float") != std::string::npos);
+  WriteFile(dir.path / L"extpcm.wav", WavBytes(0xFFFE, 32, 2, 16, false));
+  CHECK(!ReadFloatWav(dir.path / L"extpcm.wav").ok());
+  WriteFile(dir.path / L"junk.wav", "RIFF....WAVE");
+  CHECK(!ReadFloatWav(dir.path / L"junk.wav").ok());
+}
+
+TEST(WavToleratesOversizedDataChunk) {
+  // Streaming writers can leave the data size at its maximum.
+  TempDir dir(L"wavstream");
+  std::string bytes = WavBytes(3, 32, 2, 16, false);
+  const size_t size_at = bytes.size() - 16 - 4;
+  const uint32_t huge = 0xFFFFFFFF;
+  bytes.replace(size_at, 4, reinterpret_cast<const char*>(&huge), 4);
+  WriteFile(dir.path / L"stream.wav", bytes);
+  auto read = ReadFloatWav(dir.path / L"stream.wav");
+  CHECK(read.ok() && read->frames() == 2);
+}
+
+// --- Hash ----------------------------------------------------------------------
+
+TEST(Sha256KnownVectors) {
+  CHECK(Sha256Hex("", 0) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855");
+  CHECK(Sha256Hex("abc", 3) == "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
+}
+
+// --- Envelopes -----------------------------------------------------------------
+
+// `seconds` of sparse noise bursts at 48 kHz, mono.
+std::vector<float> Bursts(double seconds, uint32_t seed) {
+  std::vector<float> samples(static_cast<size_t>(seconds * 48000));
+  uint32_t state = seed;
+  auto next = [&] {
+    state = state * 1664525u + 1013904223u;
+    return static_cast<float>(state >> 8) / 16777216.0f;
+  };
+  for (size_t at = 4800; at + 480 < samples.size(); at += 4800 + static_cast<size_t>(next() * 14400)) {
+    for (size_t i = 0; i < 240; ++i) samples[at + i] = next() - 0.5f;
+  }
+  return samples;
+}
+
+TEST(EstimateDelayFindsAShift) {
+  const uint64_t origin = 1'000'000'000;
+  const uint64_t bin = 1'000'000;
+  const std::vector<float> clicks = Bursts(6, 7);
+  Envelope reference(origin, bin, 8000);
+  Envelope delayed(origin, bin, 8000);
+  reference.Add(origin, 48000, 1, clicks.data(), clicks.size());
+  // 37.4 ms later, quieter, over a noise floor.
+  std::vector<float> later(clicks.size());
+  for (size_t i = 0; i < later.size(); ++i) later[i] = 0.3f * clicks[i] + 0.001f * static_cast<float>(i % 7);
+  delayed.Add(origin + 37'400'000, 48000, 1, later.data(), later.size());
+
+  const DelayEstimate estimate = EstimateDelay(reference, delayed, 500'000'000, 0, 6000);
+  CHECK(std::fabs(estimate.delay_ms - 37.4) < 0.5);
+  CHECK(estimate.correlation > 0.9);
+
+  // Unrelated audio doesn't match.
+  const std::vector<float> other = Bursts(6, 99);
+  Envelope unrelated(origin, bin, 8000);
+  unrelated.Add(origin, 48000, 1, other.data(), other.size());
+  CHECK(EstimateDelay(reference, unrelated, 500'000'000, 0, 6000).correlation < 0.5);
+}
+
+TEST(EnvelopeIgnoresFramesOffTheGrid) {
+  Envelope envelope(1'000'000'000, 1'000'000, 2);
+  const std::vector<float> ones(480, 1.0f);
+  envelope.Add(999'995'000, 48000, 1, ones.data(), ones.size());  // Starts 5 us early, ends past the grid.
+  const std::vector<double> amplitude = envelope.Amplitude();
+  CHECK(amplitude.size() == 2 && amplitude[0] == 1.0 && amplitude[1] == 1.0);
+  Envelope empty(0, 1'000'000, 0);
+  empty.Add(0, 48000, 1, ones.data(), ones.size());
+  CHECK(empty.Amplitude().empty());
 }
 
 }  // namespace
