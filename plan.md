@@ -64,7 +64,7 @@ knOBS does not ship libobs. At import time it:
 
 1. **Locates the OBS install** — installer registry key (`HKLM\SOFTWARE\OBS Studio`, default value) → `C:\Program Files\obs-studio` → manual path picker (Steam / portable installs). The version comes from `obs.dll`'s version resource, so nothing is loaded from the install.
 2. **Copies the needed subset** into `%LocalAppData%\knOBS\runtime\<obs-version>\`, mirroring the install layout (`bin\64bit`, `obs-plugins\64bit`, `data\libobs`, `data\obs-plugins\<module>`) so relative data lookups still resolve. Loading from the copy keeps OBS's own DLLs unlocked, so OBS updates aren't blocked by a running knOBS. The subset is computed from the PE import tables, not hardcoded: the import closure of `obs.dll`, `libobs-d3d11.dll` and the two modules, limited to DLLs the install ships, plus their PDBs, `data\libobs` and the two modules' data folders. For 32.2.2 that's 200 files, 53.6 MB, mostly FFmpeg: `obs.dll` imports avcodec, avformat, avutil, swscale and swresample directly, and those pull in libx264, librist, srt and zlib. The VC++ runtime and Windows DLLs come from the system. The copy happens in a staging folder with a manifest written last, so an interrupted copy is never used. Files are flushed to disk before the manifest. The manifest records each file's size and the install file's timestamp. The copy is reused only while the install still matches, because OBS drops beta and RC suffixes from `obs.dll`'s version resource, so the version alone can't tell a beta from the final release. Copies are serialized across processes with a named mutex. A replaced copy is renamed aside rather than deleted, so replacing fails as a whole while a running knOBS has it loaded.
-3. **Loads `obs.dll` from the copy** and resolves the functions it needs (31 in M0) via `GetProcAddress` into a function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`, typed from the vendored headers in `third_party/libobs`). No import lib needed, and a missing export fails gracefully instead of at process load. `obs.dll`'s own dependencies resolve from its folder and the system, never PATH or the install. A successful load changes two process-wide settings; a failed load undoes both. `AddDllDirectory(bin\64bit)` lets libobs find the graphics module by bare name. The working directory becomes the copy's `bin\64bit`, because libobs resolves `../../data/libobs/` against the working directory (`obs-windows.c`, `find_libobs_data_file`), so nothing may change it while libobs runs (the folder picker uses `FOS_NOCHANGEDIR`). Separately, the host process calls `SetDefaultDllDirectories` at startup, so plain `LoadLibrary` calls skip PATH and the working directory.
+3. **Loads `obs.dll` from the copy** and resolves the functions it needs (31 in M0, 53 after M1) via `GetProcAddress` into a function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`, typed from the vendored headers in `third_party/libobs`). No import lib needed, and a missing export fails gracefully instead of at process load. `obs.dll`'s own dependencies resolve from its folder and the system, never PATH or the install. A successful load changes two process-wide settings; a failed load undoes both. `AddDllDirectory(bin\64bit)` lets libobs find the graphics module by bare name. The working directory becomes the copy's `bin\64bit`, because libobs resolves `../../data/libobs/` against the working directory (`obs-windows.c`, `find_libobs_data_file`), so nothing may change it while libobs runs (the folder picker uses `FOS_NOCHANGEDIR`). Separately, the host process calls `SetDefaultDllDirectories` at startup, so plain `LoadLibrary` calls skip PATH and the working directory.
 4. **Checks `obs_get_version()`** against the supported range. Outside it, refuse to start with a clear tray message. The range is 32.2.0 up to, but not including, 33.0.0. The floor is the minor version of the vendored headers (32.2.2); patch releases don't change the libobs API, so 32.2.0 and 32.2.1 have the same declarations. The ceiling is the next major, which is where libobs makes breaking API changes (`obs-config.h`). Only 32.2.2 has been tested. The install's version is checked before anything is copied, and again from `obs_get_version()` after loading.
 
 When the installed OBS version changes, knOBS notices on startup and prompts a re-import, which refreshes the runtime copy. The refresh needs a process restart: libobs never unloads module DLLs (`os_dlclose` is commented out in `free_module`), and they keep `obs.dll` loaded too.
@@ -80,11 +80,11 @@ When the installed OBS version changes, knOBS notices on startup and prompts a r
 **Key libobs calls (happy path):**
 1. `obs_startup("en-US", module_config_path, nullptr)` — `module_config_path` is knOBS's own `%AppData%\knOBS\module-config`, never OBS's. knOBS treats `%AppData%\obs-studio` as read-only. `obs_startup()` initializes COM as a single-threaded apartment on its calling thread, and `obs_shutdown()` uninitializes it, so both must run on the same thread, and not one already in a multithreaded apartment.
 2. `base_set_log_handler()` → knOBS log file in `%LocalAppData%\knOBS\logs` (backs "open logs" in the tray). Set before `obs_startup` so startup is logged.
-3. `obs_reset_audio()` — sample rate + channels from the active profile's `basic.ini`.
+3. `obs_reset_audio()` — sample rate + channels from the active profile's `basic.ini`. Monitoring bypasses the audio thread, so the buffering settings don't affect what reaches the cable (M1 findings).
 4. Video: **no** `obs_reset_video()` through M2. Audio flows without it. Device-loss recovery is the open question; see M0 findings.
 5. Open + init only `win-wasapi` and `obs-filters` (`obs_open_module(bin, data)` with absolute paths into the runtime copy, then `obs_init_module`), then `obs_post_load_modules()`. No `obs_add_module_path()`: that only feeds `obs_load_all_modules()`, which knOBS doesn't use. As a side effect, OBS's safe-mode and disabled-module lists don't apply.
-6. `obs_load_source(source_data)` with the mic's saved source object from the scene collection. OBS's own loader recreates the `wasapi_input_capture` source, its filters in order, and source-level state (volume, balance, mute, Mono flag, sync offset).
-7. Post-load fixups: `obs_source_set_monitoring_type(src, OBS_MONITORING_TYPE_MONITOR_ONLY)`; clear push-to-talk / push-to-mute (no hotkeys in v1, otherwise the mic stays muted).
+6. `obs_load_private_source(source_data)` with the mic's saved source object from the scene collection. It's the private form of `obs_load_source()`: the same loader, but the source stays out of the global source list and registers no hotkeys. OBS's own loader recreates the `wasapi_input_capture` source, its filters in order, and source-level state (volume, balance, mute, Mono flag, sync offset). knOBS forces the saved monitoring type off during the load so no device opens early (`LoadSourceJson` in `src/audio/live_chain.h`).
+7. Post-load fixups: `obs_source_set_monitoring_type(src, OBS_MONITORING_TYPE_MONITOR_ONLY)`, then `obs_source_inc_active(src)`, because the monitor only plays while the source is active. Mute, push-to-talk and push-to-mute need no fixup: the monitor ignores them, in OBS as in knOBS (M1 findings).
 8. `obs_set_audio_monitoring_device()` → virtual cable (from imported config or knOBS setting).
 9. Shutdown: release sources, drain, then `obs_shutdown()`. libobs destroys sources on a background queue, and `obs_shutdown()` only waits for it when a video thread exists (`obs_wait_for_destroy_queue`). The audio and graphics threads hold source references during each tick, so a released source can reach its last release on them. The drain therefore mirrors `obs_wait_for_destroy_queue`: a no-op task with `wait=true` on each running thread (graphics, then audio), then one on `OBS_TASK_DESTROY`. Skipping the audio round trip risks a source being destroyed after its module has unloaded.
 
@@ -110,6 +110,27 @@ Measured with `knobs-smoke` (`tools/smoke`), which runs the whole bootstrap and 
 
   Recommendation: (b). It re-runs OBS's own loader, so fidelity is unaffected, and it keeps the G3 footprint.
 
+### M1 findings (OBS 32.2.2)
+
+Measured with `knobs-harness` and `knobs-live` (`tools/`). Nothing here opened the mic.
+
+- **The monitor is a capture callback, not part of the mix.** libobs's monitor (`audio-monitoring/win32/wasapi-output.c`) registers an audio capture callback on the source. It takes the post-filter audio, applies the source's volume, resamples it to the device's mix format, and writes it straight into a shared-mode WASAPI buffer (1 s, no event callback). It never passes through libobs's audio thread, and `MONITOR_ONLY` keeps the source out of the output mix entirely. So the audio buffering settings (OBS's "low latency audio buffering") don't affect what reaches the cable. The monitor plays only while the source's activation count is above zero. `obs_source_inc_active()` is enough, with no video.
+- **Mute doesn't reach the monitor.** The callback ignores its `muted` argument, so mute, push-to-talk and push-to-mute don't gate what OBS sends to VB-Cable. knOBS behaves the same by running the same code. This changes how import treats push-to-talk (§4 step 7, pre-flight).
+- **The output latency is VB-Cable's.** The time from a packet's timestamp until VB-Cable's recording side has it:
+  - 84–94 ms over five runs through libobs (push source → gain filter → monitor → CABLE Input).
+  - 81–98 ms over four runs of a bare WASAPI stream set up like the monitor.
+
+  Each run holds within ±0.2 ms. The spread between runs comes from how the cable's buffers line up at start. libobs adds nothing measurable, and OBS runs the same monitor code from the same `obs.dll`. The capture side (win-wasapi) is the same code in both too. Measuring mic to cable needs the mic.
+- **The harness is deterministic.** A push source (`obs_register_source_s`) feeds audio through `obs_source_output_audio`, which runs the filters and capture callbacks on the caller's thread before returning. So the harness needs no clock and no devices. The chain loads through `obs_load_private_source` with the source type swapped, the same loader import uses. The output was bit-identical in every case:
+  - repeated runs in one process;
+  - separate processes;
+  - Debug and Release builds;
+  - a mono input.
+
+  The M1 chain (one gain filter at 0 dB) passes input through bit-exactly. A chain with every obs-filters audio filter runs at 29× real time.
+- **Packet size matters only at rounding level.** Pushing 256-, 441- or 1024-frame packets instead of 480 changes the full chain's output by at most 2e-5. The residual is 121–130 dB below the signal, with no time shift, and about 98% of frames are identical. OBS's Media Source delivers different packet sizes from WASAPI, so the M2 comparison should expect a residual around −120 dB, not zero.
+- **win-wasapi's "default" input is the default communications device** (`InitDevice` asks for `eCommunications`), not the default recording device. The M3 mic picker should say so.
+
 **Why `obs_load_source()`:** it's the same code path OBS uses to load the collection, and the scene JSON was written by the same OBS version whose loader reads it. That removes a hand-written settings replayer as a source of drift. Manual replay (`obs_source_create` + `obs_source_filter_add` + setters) is the fallback if it misbehaves.
 
 ### Config import
@@ -118,7 +139,7 @@ Measured with `knobs-smoke` (`tools/smoke`), which runs the whole bootstrap and 
 - **Scene collection:** `%AppData%\obs-studio\basic\scenes\<SceneCollectionFile>.json`.
 - **Candidate mic sources:** `wasapi_input_capture` objects in `sources[]` **and** global audio devices stored as top-level keys (`AuxAudioDevice1` … `AuxAudioDevice4`). If more than one, the user picks.
 - **Profile settings:** `basic\profiles\<profile>\basic.ini` → `[Audio]` sample rate, channel setup, monitoring device.
-- **Pre-flight checks** (before `obs_load_source`): strip `vst_filter` entries from the filters array (warn); flag unknown filter IDs, including `nvidia_audiofx_filter` (warn); warn if a compressor has a sidechain source set (knOBS doesn't load other sources, and without video the compressor never looks one up); detect push-to-talk / push-to-mute (clear + warn); show Mono on/off in the import summary.
+- **Pre-flight checks** (before `obs_load_source`): strip `vst_filter` entries from the filters array (warn); flag unknown filter IDs, including `nvidia_audiofx_filter` (warn); warn if a compressor has a sidechain source set (knOBS doesn't load other sources, and without video the compressor never looks one up); note push-to-talk / push-to-mute and mute in the import summary (the monitor ignores them, so the cable gets audio regardless, as it does from OBS); show Mono on/off in the import summary.
 
 Exact key names are verified against the installed OBS version in M2.
 
@@ -132,18 +153,18 @@ Exact key names are verified against the installed OBS version in M2.
 - [x] Try audio-only init with no `obs_reset_video()`. Audio works, but activation doesn't (M0 findings).
 - [ ] *(Optional, off critical path)* from-source libobs debug build for stepping through problems. Not needed yet; OBS's PDBs are copied with the runtime.
 
-**M1 — Audio pipeline + determinism harness**
-- [ ] Hardcoded: create iD4 source → add one gain filter → monitor to VB-Cable
-- [ ] Verify audio arrives in another app; measure added latency vs OBS
-- [ ] Offline harness: custom source pushes a 48 kHz float WAV through the chain in fixed chunks with synthetic timestamps; capture via `obs_source_add_audio_capture_callback` → WAV
-- [ ] **Go/no-go gate:** harness output is bit-identical across runs, and live audio reaches VB-Cable with latency comparable to OBS.
+**M1 — Audio pipeline + determinism harness** (harness done 2026-09-30; the mic runs are left; see M1 findings in §4)
+- [ ] Hardcoded: create iD4 source → add one gain filter → monitor to VB-Cable. Built: `LiveChain`, run by `knobs-live --run`. Everything after the mic is verified with a push source standing in for it. The iD4 run itself is left.
+- [ ] Verify audio arrives in another app; measure added latency vs OBS. The mic-free half is done: clicks arrive on CABLE Output, and libobs adds no measurable latency over a bare stream. Left: `knobs-live --run` with the iD4, then `knobs-live --measure-mic` once with knOBS feeding the cable and once with OBS feeding it (`--external`).
+- [x] Offline harness: custom source pushes a 48 kHz float WAV through the chain in fixed chunks with synthetic timestamps; capture via `obs_source_add_audio_capture_callback` → WAV. This is `knobs-harness`, which CTest also runs.
+- [ ] **Go/no-go gate:** harness output is bit-identical across runs (met), and live audio reaches VB-Cable with latency comparable to OBS (waiting on the mic runs).
 
 **M2 — Config import + OBS comparison**
 - [ ] Resolve active profile + scene collection (`user.ini` / `global.ini`); verify key names against the installed version
 - [ ] Enumerate candidate mic sources (`sources[]` + `AuxAudioDevice*` keys); picker if multiple
 - [ ] Pre-flight checks (VST strip, unknown IDs, compressor sidechain, push-to-talk/mute) with warnings
 - [ ] Load via `obs_load_source()`; apply post-load fixups
-- [ ] Comparison vs OBS: same WAV (leading ~2 s of silence so envelopes settle identically) through an OBS Media Source with the chain pasted on and Mono/balance matched → record 32-bit float PCM. Run the same file through the harness with the imported chain. Align via cross-correlation; residual must fall below a set threshold (expect ~zero — investigate anything audible).
+- [ ] Comparison vs OBS: same WAV (leading ~2 s of silence so envelopes settle identically) through an OBS Media Source with the chain pasted on and Mono/balance matched → record 32-bit float PCM. Run the same file through the harness with the imported chain. Align via cross-correlation; residual must fall below a set threshold (expect around −120 dB rather than zero, since packet sizes differ; see M1 findings. Investigate anything audible).
 - [ ] Blind ABX on real voice: OBS vs knOBS
 
 **M3 — Tray app**
@@ -171,9 +192,9 @@ Exact key names are verified against the installed OBS version in M2.
 | Loaded DLLs block OBS updates | Always load from the shadow copy in `%LocalAppData%\knOBS\runtime\`, never from the install dir. |
 | Audio-only init has undocumented video dependencies | Confirmed in M0: activation and `video_tick` need the graphics thread. Audio is unaffected; device reconnect is decided in M3 (dummy canvas vs. source re-creation), with costs measured. |
 | `data/` path resolution (`find_libobs_data_file`) | Resolved in M0: the copy mirrors the install, the working directory is the copy's `bin\64bit`, and module paths are passed explicitly. The smoke test verifies both. |
-| Monitoring path latency differs from OBS | Same code path as OBS monitoring, should match; verify in M1. |
+| Monitoring path latency differs from OBS | Same code path as OBS monitoring. Without the mic, libobs adds no measurable latency over a bare stream (M1 findings). The mic-to-cable comparison against OBS is the last M1 step. |
 | Doubled audio when OBS and knOBS both monitor to VB-Cable | Auto-pause while `obs64.exe` runs. |
-| Push-to-talk/mute on the imported source silences the mic | Clear on import with a warning; PTT support is a v2 idea. |
+| Push-to-talk/mute on the imported source | Doesn't silence the cable: libobs's monitor ignores mute, in OBS too (M1 findings). The import summary notes it. PTT support is a v2 idea. |
 | OBS updates change scene JSON schema / filter IDs | `obs_load_source()` from the user's own OBS version; pre-flight validates and warns on unknown IDs. |
 | Chain includes a VST filter | Not supported in v1: stripped with a loud warning. v2 feature. |
 | NVIDIA noise suppression needs an external runtime | v1 promises Speex/RNNoise. In OBS 32 NVIDIA's filter lives in the separate `nv-filters` module, which v1 doesn't load, so a chain using it imports without it (warned). Loading `nv-filters` is a v2 idea. |
@@ -202,6 +223,13 @@ Exact key names are verified against the installed OBS version in M2.
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 4 (2026-09-30)
+
+- M1: the offline harness is done and deterministic, and the live path is built. Mic-free measurements show libobs's monitor adds no latency over VB-Cable's own. The mic runs are still to do. Added the M1 findings (§4).
+- libobs's monitor ignores mute, so push-to-talk and mute don't gate what OBS sends to VB-Cable either. Changed §4 step 7, the pre-flight and the risk table: import notes push-to-talk instead of clearing it.
+- Import loads through `obs_load_private_source`, the private form of `obs_load_source`.
+- The M2 comparison should expect a residual around −120 dB, not zero, because the output depends on packet size at rounding level.
 
 ### Revision notes — Rev 3 (2026-09-30)
 
