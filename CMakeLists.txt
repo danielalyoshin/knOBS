@@ -50,6 +50,7 @@ add_library(knobs_tools STATIC
   tools/common/envelope.cpp
   tools/common/push_source.cpp
   tools/common/sha256.cpp
+  tools/common/text_file.cpp
   tools/common/wav.cpp
 )
 target_include_directories(knobs_tools PUBLIC tools)

@@ -19,9 +19,7 @@
 #include <cwchar>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -31,6 +29,7 @@
 #include "common/console.h"
 #include "common/push_source.h"
 #include "common/sha256.h"
+#include "common/text_file.h"
 #include "common/wav.h"
 #include "harness/test_signal.h"
 #include "runtime/obs_host.h"
@@ -83,11 +82,14 @@ bit-identical.
   --in <file.wav>          48 kHz 32-bit float, mono or stereo. Default: a built-in
                            12 s test signal.
   --source <file.json>     The chain, as an OBS source object (one entry of a scene
-                           collection's "sources"). Its filters and source-level state
-                           are used; its source type isn't.
+                           collection's "sources"). Its filters and the source-level
+                           state libobs applies before them (balance, Mono) are used;
+                           its source type isn't.
   --chain coverage|gain    A built-in chain instead: every obs-filters audio filter
                            (default), or {}'s M1 chain, one gain filter at 0 dB.
-  --out <file.wav>         Write the output: 32-bit float, stereo, 48 kHz.
+  --out <file.wav>         Write the output: 32-bit float, stereo, 48 kHz. It's what
+                           the filters output, before the source's volume, which
+                           libobs applies afterwards (in the monitor and the mix).
   --save-input <file.wav>  Write the input, e.g. to reuse the built-in signal.
   --chunk <frames>         Frames per push (default 480: 10 ms, WASAPI's usual packet).
   --runs <n>               Runs to compare (default 3, at most {}).
@@ -157,18 +159,10 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
   return options;
 }
 
-Result<std::string> ReadText(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
-  if (!in) return Error{std::format("Couldn't open {}.", ToUtf8(file))};
-  std::ostringstream text;
-  text << in.rdbuf();
-  return text.str();
-}
-
 std::string Level(const std::vector<float>& samples) {
   float peak = 0;
   for (const float x : samples) peak = std::max(peak, std::fabs(x));
-  return peak > 0 ? std::format("{:.1f} dBFS", 20 * std::log10(peak)) : std::string("silence");
+  return FormatPeak(peak);
 }
 
 // What the capture callback has collected, interleaved.
@@ -195,7 +189,15 @@ Result<Collected> RunOnce(const runtime::ObsApi& api, runtime::ObsSession& sessi
                           const FloatAudio& input, uint32_t chunk, bool report_chain) {
   auto source = audio::LoadSourceJson(api, json, kPushSourceId);
   if (!source) return Error{source.error()};
-  if (report_chain) ReportChain(audio::DescribeChain(api, *source));
+  if (report_chain) {
+    const audio::ChainInfo chain = audio::DescribeChain(api, *source);
+    ReportChain(chain);
+    if (chain.volume != 1.0f) {
+      Report(Outcome::kNote, "volume",
+             std::format("the output leaves out the source's volume ({:.2f}); libobs applies it afterwards",
+                         chain.volume));
+    }
+  }
 
   Collected collected;
   collected.channels = get_audio_channels(session.options().speakers);
@@ -286,10 +288,12 @@ int Run(const Options& options) {
         std::format("OBS {}, no video, no audio devices", (*host)->install().version.ToString()));
   RegisterPushSource(api);
 
-  // Runs.
+  // Runs. Stops at the first one that fails; earlier failures, such as
+  // --save-input's, don't stop them.
   std::optional<Collected> first;
   std::string first_hash;
-  for (int run = 1; run <= options.runs && !AnyFailed(); ++run) {
+  bool run_failed = false;
+  for (int run = 1; run <= options.runs && !run_failed; ++run) {
     const auto started = std::chrono::steady_clock::now();
     auto output = RunOnce(api, (*host)->session(), json, input, options.chunk, run == 1);
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
@@ -302,14 +306,17 @@ int Run(const Options& options) {
     const std::string step = std::format("run {}", run);
     if (hash.empty()) {
       Check(false, step, "couldn't hash the output");
+      run_failed = true;
     } else if (!first) {
-      Check(!output->samples.empty(), step,
+      run_failed = output->samples.empty();
+      Check(!run_failed, step,
             std::format("{:.2f} s out in {:.2f} s ({:.0f}x real time), peak {}, sha256 {}", out_seconds,
                         seconds, out_seconds / seconds, Level(output->samples), hash));
       first = std::move(*output);
       first_hash = hash;
     } else {
       const bool same = hash == first_hash && output->samples.size() == first->samples.size();
+      run_failed = !same;
       Check(same, step,
             same ? std::format("bit-identical to run 1 ({:.2f} s)", seconds)
                  : std::format("differs from run 1: {} frames, sha256 {}",
@@ -321,16 +328,7 @@ int Run(const Options& options) {
     const auto written = WriteFloatWav(*options.out, {kSampleRate, first->channels, first->samples});
     Check(written.ok(), "output", written.ok() ? ToUtf8(*options.out) : written.error());
   }
-
-  const long leaks = (*host)->Shutdown();
-  Check(leaks == 0, "shutdown",
-        leaks == 0 ? "0 leaked allocations" : std::format("{} libobs allocations leaked", leaks));
-  Report(Outcome::kNote, "libobs log",
-         std::format("{} ({} warnings/errors)", ToUtf8((*host)->log().path()), (*host)->log().problem_count()));
-  for (const std::string& line : (*host)->log().RecentProblems()) Print(std::format("{:26}{}\n", "", line));
-
-  Print(AnyFailed() ? "FAIL\n" : "PASS\n");
-  return AnyFailed() ? kExitFail : kExitPass;
+  return FinishRun(**host);
 }
 
 }  // namespace

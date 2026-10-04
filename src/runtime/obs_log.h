@@ -68,7 +68,8 @@ class ObsLog {
 void PruneLogs(const std::filesystem::path& dir, std::wstring_view prefix, size_t keep);
 
 // Opens "<prefix><local date and time>.txt" in `dir`, first pruning older
-// logs with that prefix so that `keep` remain, counting the new one.
+// logs with that prefix so that `keep` remain, counting the new one. A run in
+// the same second as another gets " (2)" and so on. `prefix` can't be empty.
 Result<std::unique_ptr<ObsLog>> OpenNewLog(const std::filesystem::path& dir,
                                            std::wstring_view prefix, size_t keep);
 

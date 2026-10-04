@@ -5,6 +5,8 @@
 #include <cstdint>
 #include <numbers>
 
+#include "common/random.h"
+
 namespace knobs::tools {
 namespace {
 
@@ -14,21 +16,7 @@ constexpr double kSettleSeconds = 2;
 // Covers the default thresholds of the expander (-40), gate (-32/-26),
 // upward compressor (-20), compressor (-18) and limiter (-6).
 constexpr double kBurstLevelsDb[] = {-40, -30, -20, -12, -6, -1};
-
-// xorshift32: the same sequence on every run and build.
-class Random {
- public:
-  float Uniform() {  // [-1, 1)
-    state_ ^= state_ << 13;
-    state_ ^= state_ >> 17;
-    state_ ^= state_ << 5;
-    return static_cast<float>(static_cast<int32_t>(state_)) / 2147483648.0f;
-  }
-  double Between(double lo, double hi) { return lo + (hi - lo) * (Uniform() * 0.5 + 0.5); }
-
- private:
-  uint32_t state_ = 0x6B6E6F62;  // "knob"
-};
+constexpr uint32_t kSeed = 0x6B6E6F62;  // "knob"
 
 double DbToGain(double db) { return std::pow(10.0, db / 20.0); }
 
@@ -41,7 +29,7 @@ FloatAudio MakeTestSignal() {
   const size_t frames = static_cast<size_t>(kSeconds * kRate);
   audio.samples.resize(frames * 2);
 
-  Random random;
+  XorShift32 random(kSeed);
   const double floor = DbToGain(-60);
   for (size_t i = 0; i < frames; ++i) {
     audio.samples[2 * i] = static_cast<float>(floor * random.Uniform());

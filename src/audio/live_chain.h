@@ -23,6 +23,11 @@ std::string MicWithGainSourceJson(std::string_view device_id, double gain_db);
 // is off afterwards, whatever the JSON says. A non-empty `type_id` replaces the
 // source's type and keeps everything else, filters included. Returns a new
 // reference.
+//
+// Doesn't call obs_source_load2, which runs the source's and its filters'
+// `load` callbacks. OBS's frontend doesn't either for global audio devices
+// (Mic/Aux), but obs_load_sources does for a scene collection's "sources".
+// Import calls it for those, to match.
 Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_view json,
                                      std::string_view type_id = {});
 
@@ -32,9 +37,12 @@ struct ChainInfo {
     std::string type;  // Versioned, e.g. "noise_suppress_filter_v2".
     std::string name;
     bool enabled = true;
-    // Whether libobs has an audio filter of this type. It still loads one it
-    // doesn't know, as a placeholder that passes audio through untouched.
+    // Whether libobs has a filter of this type. It still loads one it doesn't
+    // know, as a placeholder that passes audio through untouched.
     bool known = true;
+    // Whether it's an audio filter. Others, such as video filters, pass audio
+    // through too.
+    bool audio = true;
   };
   std::string type;
   // Applied before the filters (obs-source.c, process_audio).

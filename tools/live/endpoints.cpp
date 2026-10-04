@@ -164,11 +164,6 @@ Status EndpointRecorder::Stop() {
   return Ok{};
 }
 
-float EndpointRecorder::TakePeak() {
-  std::lock_guard lock(mutex_);
-  return std::exchange(peak_, 0.0f);
-}
-
 void EndpointRecorder::Run(const std::string& device_id, std::promise<Status>* opened) {
   CoInitializeEx(nullptr, COINIT_MULTITHREADED);
   const HANDLE packet_event = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -201,11 +196,8 @@ void EndpointRecorder::Run(const std::string& device_id, std::promise<Status>* o
             samples = silence.data();
           }
           envelope_.Add(first_ns, stream.sample_rate, stream.channels, samples, frames);
-          float peak = 0;
-          for (size_t i = 0; i < size_t{frames} * stream.channels; ++i) peak = std::max(peak, std::fabs(samples[i]));
+          peak_.Add(samples, size_t{frames} * stream.channels);
           stream.capture->ReleaseBuffer(frames);
-          std::lock_guard lock(mutex_);
-          peak_ = std::max(peak_, peak);
         }
       }
       stream.client->Stop();

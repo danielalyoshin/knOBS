@@ -29,7 +29,7 @@ Don't open the mic without the user's go-ahead.
 - `src/runtime/`: finding OBS, the runtime copy, loading `obs.dll` and its function table, the libobs session, logging, and `ObsHost`, which runs all of those in order.
 - `src/audio/`: the live path. Device lists, and `LiveChain`, which loads a source through OBS's loader and monitors it.
 - `src/util/`: `Result`, UTF-8, JSON and Win32 helpers, knOBS's app folders.
-- `tools/common/`: code shared by the dev tools (console output, WAV I/O, the push source, energy envelopes). It isn't part of the app.
+- `tools/common/`: code shared by the dev tools (console output, WAV and text files, the push source, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
 - `tools/smoke/`, `tools/harness/`, `tools/live/`: the dev tools above. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`.
 - `tests/`: unit tests. These don't need OBS.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.

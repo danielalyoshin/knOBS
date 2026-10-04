@@ -37,7 +37,8 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
   session_options.module_config_dir = dirs->ModuleConfig();
   session_options.video = options.video;
   auto session = ObsSession::Start(*host->runtime_, session_options);
-  if (!session) return Error{session.error()};
+  // The host and its log go away with this return, so say where the log is.
+  if (!session) return Error{std::format("{} Log: {}", session.error(), ToUtf8(host->log_->path()))};
   host->session_ = std::move(*session);
   return host;
 }

@@ -43,6 +43,7 @@ namespace knobs::runtime {
   X(obs_data_set_string)                      \
   X(obs_data_set_double)                      \
   X(obs_data_set_int)                         \
+  X(obs_data_set_default_int)                 \
   /* Sources */                               \
   X(obs_register_source_s)                    \
   X(obs_source_create_private)                \

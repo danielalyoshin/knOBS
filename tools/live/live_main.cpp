@@ -16,11 +16,8 @@
 #include <cwchar>
 #include <filesystem>
 #include <format>
-#include <fstream>
 #include <functional>
-#include <mutex>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -33,6 +30,8 @@
 #include "common/console.h"
 #include "common/envelope.h"
 #include "common/push_source.h"
+#include "common/random.h"
+#include "common/text_file.h"
 #include "live/endpoints.h"
 #include "runtime/obs_host.h"
 #include "util/win_strings.h"
@@ -50,21 +49,22 @@ constexpr uint64_t kMaxDelayNs = 1'000'000'000;   // Latencies searched: 0 to 1 
 constexpr int kWindows = 4;                       // Separate estimates per measurement.
 constexpr double kMinCorrelation = 0.5;
 constexpr int kMaxSeconds = 3600;
-// Each quarter of the window needs some sound, and speech has pauses.
+// Each quarter of a measurement needs some sound. Speech has pauses, and the
+// test clicks start 0.3 s in and come 0.15 to 0.45 s apart.
 constexpr int kMinMeasureSeconds = 8;
 
 std::string Usage() {
   return std::format(R"(Usage: knobs-live <mode> [options]
 
-Runs {}'s live audio path with no OBS process: a source through an OBS
+Runs {0}'s live audio path with no OBS process: a source through an OBS
 filter chain, monitored by libobs into a virtual cable. Until import lands,
 the chain is the mic with one gain filter.
 
 Modes (pick one):
   --list-devices           List recording and playback devices. Opens none.
   --measure-output <s>     Mic-free. Pushes a click pattern through the chain into
-                           --output for s seconds and measures how long it takes to
-                           arrive on --listen.
+                           --output for s seconds (at least {1}) and measures how long
+                           it takes to arrive on --listen.
   --measure-cable <s>      Mic-free baseline: the same clicks written straight into
                            --output by a stream set up like libobs's monitor, without
                            libobs. The difference from --measure-output is libobs's.
@@ -72,7 +72,7 @@ Modes (pick one):
                            s seconds (Ctrl+C stops), reporting the level that arrives
                            on --listen each second.
   --measure-mic <s>        Opens the mic. Measures mic-to-cable latency over s seconds
-                           (at least {}; 20 is better) by comparing the mic with
+                           (at least {1}; 20 is better) by comparing the mic with
                            --listen. Keep talking or tapping the mic while it runs.
 
 Options:
@@ -119,7 +119,7 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     if (!value) return true;
     wchar_t* end = nullptr;
     const long seconds = std::wcstol(value, &end, 10);
-    const long min = mode == Mode::kMeasureMic ? kMinMeasureSeconds : 1;
+    const long min = mode == Mode::kRun ? 1 : kMinMeasureSeconds;
     if (end == value || *end != L'\0' || seconds < min || seconds > kMaxSeconds) return false;
     options.seconds = static_cast<int>(seconds);
     return true;
@@ -160,7 +160,7 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--gain-db") {
       wchar_t* end = nullptr;
       options.gain_db = std::wcstod(value, &end);
-      ok = *end == L'\0' && std::isfinite(options.gain_db) && std::fabs(options.gain_db) <= 60;
+      ok = end != value && *end == L'\0' && std::isfinite(options.gain_db) && std::fabs(options.gain_db) <= 60;
     } else if (arg == L"--source") {
       options.source = fs::absolute(value);
     } else if (arg == L"--obs-dir") {
@@ -197,22 +197,10 @@ bool SleepFor(std::chrono::steady_clock::duration duration) {
   return false;
 }
 
-std::string Db(float peak) {
-  return peak > 0 ? std::format("{:.1f} dBFS", 20 * std::log10(peak)) : std::string("silence");
-}
-
 std::string Join(const std::vector<std::string>& names) {
   std::string text;
   for (const std::string& name : names) text += (text.empty() ? "" : ", ") + name;
   return text;
-}
-
-Result<std::string> ReadText(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
-  if (!in) return Error{std::format("Couldn't open {}.", ToUtf8(file))};
-  std::ostringstream text;
-  text << in.rdbuf();
-  return text.str();
 }
 
 size_t Bins(uint64_t duration_ns) { return static_cast<size_t>(duration_ns / kBinNs); }
@@ -260,9 +248,10 @@ class ClickTrain {
       if (click_frame_ < click_frames_) {
         const float window =
             0.5f - 0.5f * std::cos(6.2831853f * static_cast<float>(click_frame_) / static_cast<float>(click_frames_));
-        sample = kClickLevel * window * Uniform();
+        sample = kClickLevel * window * random_.Uniform();
         if (++click_frame_ == click_frames_) {
-          gap_ = static_cast<size_t>((0.15f + 0.3f * (Uniform() * 0.5f + 0.5f)) * static_cast<float>(sample_rate_));
+          gap_ = static_cast<size_t>((0.15f + 0.3f * (random_.Uniform() * 0.5f + 0.5f)) *
+                                     static_cast<float>(sample_rate_));
         }
       } else if (gap_ == 0 || --gap_ == 0) {
         click_frame_ = 0;
@@ -274,19 +263,12 @@ class ClickTrain {
  private:
   static constexpr float kClickLevel = 0.25f;  // -12 dBFS
 
-  float Uniform() {  // xorshift32, [-1, 1)
-    state_ ^= state_ << 13;
-    state_ ^= state_ >> 17;
-    state_ ^= state_ << 5;
-    return static_cast<float>(static_cast<int32_t>(state_)) / 2147483648.0f;
-  }
-
   uint32_t sample_rate_;
   uint32_t channels_;
   size_t click_frames_;  // 4 ms
   size_t click_frame_;   // Where in the current click; click_frames_ between clicks.
   size_t gap_;           // Frames until the next click.
-  uint32_t state_ = 0x636C6B21;
+  XorShift32 random_{0x636C6B21};
 };
 
 // Waits until NowNs() reaches `deadline_ns`, with a high-resolution timer.
@@ -330,9 +312,10 @@ void MeasureClicks(const Options& options, const audio::AudioDevice& listen, uin
     // A device delivers a packet once its last frame is in.
     WaitUntil(timer, start + (n + 1) * packet_ns);
     clicks.Next(packet.data(), packet_frames);
-    // As win-wasapi stamps packets without device timing: the time of the
-    // first frame, one packet before now.
-    const uint64_t first_ns = NowNs() - packet_ns;
+    // The time of the packet's first frame, one packet before its slot ends.
+    // That's how win-wasapi stamps packets without device timing, when on
+    // time. Packets sent late to catch up keep their own slots.
+    const uint64_t first_ns = start + n * packet_ns;
     reference.Add(first_ns, sample_rate, channels, packet.data(), packet_frames);
     sink(packet.data(), packet_frames, first_ns);
   }
@@ -392,25 +375,11 @@ void MeasureCable(const Options& options, const audio::AudioDevice& output, cons
   if (failure) Check(false, "play", *failure);
 }
 
-struct PeakMeter {
-  std::mutex mutex;
-  float peak = 0;
-
-  float Take() {
-    std::lock_guard lock(mutex);
-    return std::exchange(peak, 0.0f);
-  }
-};
-
 void OnChainAudio(void* param, obs_source_t*, const audio_data* audio, bool) {
-  float peak = 0;
+  auto* meter = static_cast<PeakHold*>(param);
   for (size_t c = 0; c < MAX_AV_PLANES && audio->data[c]; ++c) {
-    const auto* samples = reinterpret_cast<const float*>(audio->data[c]);
-    for (uint32_t i = 0; i < audio->frames; ++i) peak = std::max(peak, std::fabs(samples[i]));
+    meter->Add(reinterpret_cast<const float*>(audio->data[c]), audio->frames);
   }
-  auto* meter = static_cast<PeakMeter*>(param);
-  std::lock_guard lock(meter->mutex);
-  meter->peak = std::max(meter->peak, peak);
 }
 
 // Opens the mic: runs it through the chain into the cable, and shows what
@@ -426,7 +395,7 @@ void RunMic(runtime::ObsHost& host, const Options& options, const audio::AudioDe
   auto chain = audio::LiveChain::Start(api, host.session(), json);
   if (!chain) return Check(false, "chain", chain.error());
   ReportChain(audio::DescribeChain(api, (*chain)->source()));
-  PeakMeter meter;
+  PeakHold meter;
   api.obs_source_add_audio_capture_callback((*chain)->source(), OnChainAudio, &meter);
 
   bool arrived = false;
@@ -435,15 +404,18 @@ void RunMic(runtime::ObsHost& host, const Options& options, const audio::AudioDe
     const float cable_peak = (*recorder)->TakePeak();
     arrived = arrived || cable_peak > 0;
     Report(Outcome::kNote, std::format("{:>4} s", second),
-           std::format("chain out {:<14} cable {}", Db(chain_peak), Db(cable_peak)));
+           std::format("chain out {:<14} cable {}", FormatPeak(chain_peak), FormatPeak(cable_peak)));
   }
 
   api.obs_source_remove_audio_capture_callback((*chain)->source(), OnChainAudio, &meter);
   (*chain).reset();
   const auto stopped = (*recorder)->Stop();
   if (!stopped) return Check(false, "listen", stopped.error());
-  Check(arrived, "cable", arrived ? std::format("audio arrived on \"{}\"", listen.name)
-                                  : std::format("nothing arrived on \"{}\"", listen.name));
+  if (!arrived && g_interrupted) return Report(Outcome::kNote, "cable", "interrupted");
+  // With --force, another app's audio on the cable counts too.
+  Check(arrived, "cable",
+        arrived ? std::format("audio arrived on \"{}\"{}", listen.name, options.force ? " (--force: maybe not ours)" : "")
+                : std::format("nothing arrived on \"{}\"", listen.name));
 }
 
 // Opens the mic: records it and the cable's recording side side by side and
@@ -461,16 +433,18 @@ void MeasureMic(runtime::ObsHost& host, const Options& options, const audio::Aud
   if (!mic_recorder) return Check(false, "mic", mic_recorder.error());
   auto cable_recorder = EndpointRecorder::Start(listen.id, Envelope(origin, kBinNs, bins));
   if (!cable_recorder) return Check(false, "listen", cable_recorder.error());
-  std::optional<Result<std::unique_ptr<audio::LiveChain>>> chain;
+  std::unique_ptr<audio::LiveChain> chain;
   if (!options.external) {
-    chain = audio::LiveChain::Start(api, host.session(), json);
-    if (!*chain) return Check(false, "chain", chain->error());
-    ReportChain(audio::DescribeChain(api, (**chain)->source()));
+    auto started = audio::LiveChain::Start(api, host.session(), json);
+    if (!started) return Check(false, "chain", started.error());
+    chain = std::move(*started);
+    ReportChain(audio::DescribeChain(api, chain->source()));
   }
 
   for (int second = 1; second <= options.seconds && SleepFor(1s); ++second) {
     Report(Outcome::kNote, std::format("{:>4} s", second),
-           std::format("mic {:<14} cable {}", Db((*mic_recorder)->TakePeak()), Db((*cable_recorder)->TakePeak())));
+           std::format("mic {:<14} cable {}", FormatPeak((*mic_recorder)->TakePeak()),
+                       FormatPeak((*cable_recorder)->TakePeak())));
   }
   chain.reset();
   const auto mic_stopped = (*mic_recorder)->Stop();
@@ -594,15 +568,7 @@ int Run(const Options& options) {
   } else {
     RunMode(**host, options, mics, outputs);
   }
-
-  const long leaks = (*host)->Shutdown();
-  Check(leaks == 0, "shutdown",
-        leaks == 0 ? "0 leaked allocations" : std::format("{} libobs allocations leaked", leaks));
-  Report(Outcome::kNote, "libobs log",
-         std::format("{} ({} warnings/errors)", ToUtf8((*host)->log().path()), (*host)->log().problem_count()));
-  for (const std::string& line : (*host)->log().RecentProblems()) Print(std::format("{:26}{}\n", "", line));
-  Print(AnyFailed() ? "FAIL\n" : "PASS\n");
-  return AnyFailed() ? kExitFail : kExitPass;
+  return FinishRun(**host);
 }
 
 }  // namespace

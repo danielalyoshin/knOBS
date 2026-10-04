@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <utility>
 
 namespace knobs::tools {
 
@@ -19,6 +20,18 @@ uint64_t NowNs() {
   const uint64_t ticks = static_cast<uint64_t>(counter.QuadPart);
   // As libobs's util_mul_div64, without overflowing.
   return ticks / frequency * 1'000'000'000 + ticks % frequency * 1'000'000'000 / frequency;
+}
+
+void PeakHold::Add(const float* samples, size_t count) {
+  float peak = 0;
+  for (size_t i = 0; i < count; ++i) peak = std::max(peak, std::fabs(samples[i]));
+  std::lock_guard lock(mutex_);
+  peak_ = std::max(peak_, peak);
+}
+
+float PeakHold::Take() {
+  std::lock_guard lock(mutex_);
+  return std::exchange(peak_, 0.0f);
 }
 
 Envelope::Envelope(uint64_t origin_ns, uint64_t bin_ns, size_t bins)

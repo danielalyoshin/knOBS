@@ -99,11 +99,25 @@ void PruneLogs(const std::filesystem::path& dir, std::wstring_view prefix, size_
 
 Result<std::unique_ptr<ObsLog>> OpenNewLog(const std::filesystem::path& dir,
                                            std::wstring_view prefix, size_t keep) {
+  // Pruning matches by prefix, so an empty one would prune every program's logs.
+  if (prefix.empty()) return Error{"A log needs a name prefix."};
   PruneLogs(dir, prefix, keep > 0 ? keep - 1 : 0);
   SYSTEMTIME t;
   GetLocalTime(&t);
-  return ObsLog::Open(dir / std::format(L"{}{:04}-{:02}-{:02} {:02}-{:02}-{:02}.txt", prefix, t.wYear,
-                                        t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond));
+  const std::wstring stem = std::format(L"{}{:04}-{:02}-{:02} {:02}-{:02}-{:02}", prefix, t.wYear, t.wMonth,
+                                        t.wDay, t.wHour, t.wMinute, t.wSecond);
+  // Runs started in the same second get " (2)", " (3)" and so on. Open fails
+  // on a file another run still has open, so that moves on too.
+  std::string error = std::format("Couldn't find a free log name in {}.", ToUtf8(dir));
+  for (int n = 1; n <= 100; ++n) {
+    const std::filesystem::path file = dir / (n == 1 ? stem + L".txt" : std::format(L"{} ({}).txt", stem, n));
+    std::error_code ec;
+    if (std::filesystem::exists(file, ec)) continue;
+    auto log = ObsLog::Open(file);
+    if (log) return log;
+    error = log.error();
+  }
+  return Error{error};
 }
 
 }  // namespace knobs::runtime

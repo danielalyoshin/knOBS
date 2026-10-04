@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <vector>
 
 namespace knobs::tools {
@@ -10,6 +11,18 @@ namespace knobs::tools {
 // Now on the QueryPerformanceCounter clock, in nanoseconds. libobs's
 // os_gettime_ns() and WASAPI's capture timestamps use the same clock.
 uint64_t NowNs();
+
+// The largest absolute sample since the last Take(). An audio thread can add
+// while another thread takes.
+class PeakHold {
+ public:
+  void Add(const float* samples, size_t count);
+  float Take();
+
+ private:
+  std::mutex mutex_;
+  float peak_ = 0;
+};
 
 // A signal's power on a fixed time grid: bin i averages the frames that fell
 // in [origin + i * bin, origin + (i + 1) * bin). Keeps no audio, so it can't

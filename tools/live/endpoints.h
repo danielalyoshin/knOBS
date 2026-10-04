@@ -37,7 +37,7 @@ class EndpointRecorder {
   // Stops recording. Returns an error if the stream failed while recording.
   Status Stop();
   // The peak absolute sample since the last call.
-  float TakePeak();
+  float TakePeak() { return peak_.Take(); }
   // Complete once Stop() has returned.
   const Envelope& envelope() const { return envelope_; }
 
@@ -50,8 +50,8 @@ class EndpointRecorder {
   Envelope envelope_;  // Only the recording thread touches it until Stop().
   std::thread thread_;
   void* stop_event_ = nullptr;  // HANDLE
-  std::mutex mutex_;
-  float peak_ = 0;
+  PeakHold peak_;
+  std::mutex mutex_;  // Guards error_.
   std::string error_;
 };
 

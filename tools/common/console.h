@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 
+#include <string>
 #include <string_view>
 
 #include "audio/live_chain.h"
+
+namespace knobs::runtime {
+class ObsHost;
+}
 
 // Console reporting shared by the knOBS tools: one "[tag] step  detail" line
 // per check.
@@ -29,5 +34,12 @@ bool AnyFailed();
 
 // Reports a loaded chain as a note: its source-level state and filters.
 void ReportChain(const audio::ChainInfo& chain);
+
+// A peak sample level as "-6.0 dBFS", or "silence" for 0.
+std::string FormatPeak(float peak);
+
+// Ends a tool's run: shuts libobs down, reports leaks and the log's
+// warnings, and prints PASS or FAIL. Returns the exit code.
+int FinishRun(runtime::ObsHost& host);
 
 }  // namespace knobs::tools

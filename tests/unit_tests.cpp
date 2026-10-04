@@ -19,6 +19,7 @@
 
 #include "audio/audio_devices.h"
 #include "audio/live_chain.h"
+#include "common/console.h"
 #include "common/envelope.h"
 #include "common/sha256.h"
 #include "common/wav.h"
@@ -375,6 +376,38 @@ TEST(OpenNewLogPrunesToKeep) {
     if (entry.path().filename().native().starts_with(L"live ")) ++count;
   }
   CHECK(count == 2);
+}
+
+TEST(OpenNewLogNeedsPrefix) {
+  TempDir dir(L"noprefix");
+  WriteFile(dir.path / L"other.txt", "not ours");
+  CHECK(!OpenNewLog(dir.path, L"", 1).ok());
+  CHECK(fs::exists(dir.path / L"other.txt"));
+}
+
+TEST(OpenNewLogNamesConcurrentRunsApart) {
+  TempDir dir(L"samesecond");
+  // Both stay open, as two runs of one tool would.
+  auto first = OpenNewLog(dir.path, L"live ", 5);
+  auto second = OpenNewLog(dir.path, L"live ", 5);
+  CHECK(first.ok() && second.ok());
+  if (!first || !second) return;
+  CHECK((*first)->path() != (*second)->path());
+}
+
+// --- Tool helpers --------------------------------------------------------------
+
+TEST(PeakHoldTakesAndResets) {
+  PeakHold peak;
+  const float samples[] = {0.1f, -0.5f, 0.25f};
+  peak.Add(samples, 3);
+  CHECK(peak.Take() == 0.5f);
+  CHECK(peak.Take() == 0.0f);
+}
+
+TEST(FormatPeakSaysSilence) {
+  CHECK(FormatPeak(0.0f) == "silence");
+  CHECK(FormatPeak(0.5f) == "-6.0 dBFS");
 }
 
 // --- JSON ----------------------------------------------------------------------

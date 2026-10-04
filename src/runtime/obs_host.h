@@ -20,6 +20,7 @@ struct HostOptions {
   // The OBS install to use. Default: FindObsInstall().
   std::optional<std::filesystem::path> obs_dir;
   // Names this program's logs in %LocalAppData%\knOBS\logs, e.g. L"harness ".
+  // Required: only logs with this prefix are pruned.
   std::wstring log_prefix;
   size_t kept_logs = 20;
   // Also print the log to stderr, debug lines included.
