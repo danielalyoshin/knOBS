@@ -2,7 +2,7 @@
 
 Windows tray app that runs the user's OBS mic filter chain through their installed libobs and sends the result to a virtual audio cable, with no OBS process. Design, milestones and rationale are in [plan.md](plan.md). Read it before non-trivial work. When a decision changes, update it and tick milestone boxes as work lands.
 
-Status: M0 (runtime bootstrap) is done against OBS 32.2.2. In M1, the offline harness passes its gate and the live path is verified up to VB-Cable without a mic. The mic runs (the iD4 into VB-Cable, latency vs OBS) are still to do.
+Status: M0 (runtime bootstrap) and M1 (live path and offline harness) are done against OBS 32.2.2. The mic-to-cable latency matches OBS. M2 (config import and the comparison against OBS) is next.
 
 ## Stack
 - C++20, CMake, MSVC (VS 2022 or newer; the preset uses the newest installed Visual Studio), x64 only, static CRT.
