@@ -47,7 +47,7 @@ Don't open the mic without the user's go-ahead.
 
 ## Conventions
 - Every source file starts with `// SPDX-License-Identifier: GPL-2.0-or-later`.
-- Keep the display name "knOBS" in one constant. It may become "Knobs" before release.
+- Keep the display name "knOBS" in one constant. It becomes "Knobs" if the OBS team asks for a change.
 
 ## Git
 - Commit straight to `main`.

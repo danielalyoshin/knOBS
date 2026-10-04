@@ -2,7 +2,7 @@
 
 > **Your OBS mic chain, without OBS.** A lightweight Windows tray app that runs your exact OBS audio filter chain (gate, expander, compressor, noise suppression) against your microphone and outputs to a virtual audio cable — no OBS process required.
 
-*Name: **knOBS**, pronounced "knobs" — the audio kind, with OBS inside it. Open item before public release: the OBS Project's [Forum Resource and IP Policy](https://obsproject.com/forum/threads/forum-resource-and-ip-policy.178569/) (Jan 2026) asks third-party tools to avoid the "OBS" acronym in names, and its branding rules apply to any app, not just forum submissions. Ask the OBS team before launch; fallback styling if needed: **Knobs**.*
+*Name: **knOBS**, pronounced "knobs" — the audio kind, with OBS inside it. The OBS Project's [Forum Resource and IP Policy](https://obsproject.com/forum/threads/forum-resource-and-ip-policy.178569/) (Jan 2026) asks third-party tools to avoid the "OBS" acronym in names, and its branding rules apply to any app, not just forum submissions. Decision (2026-10-04): keep the name and don't ask in advance. If the OBS team asks for a change, reconsider then; the fallback styling is **Knobs**.*
 
 ---
 
@@ -206,7 +206,6 @@ Exact key names are verified against the installed OBS version in M2.
 - [ ] Packaging: small exe (no bundled libobs); simple installer or portable zip
 - [ ] README with the pitch ("close OBS, keep your mic"), setup guide, VB-Cable pointer, "requires OBS Studio installed" + supported version range
 - [ ] GPL-2.0-or-later compliance (links libobs): publish source, include license texts
-- [ ] Name check: ask the OBS team about "knOBS" before public launch (fallback: Knobs)
 - [ ] AI-use disclaimer in the forum post (required by the OBS Forum Resource and IP Policy)
 - [ ] Post to OBS forums / r/obs — this is where the users who asked for this live
 
@@ -226,7 +225,7 @@ Exact key names are verified against the installed OBS version in M2.
 | OBS updates change scene JSON schema / filter IDs | `obs_load_source()` from the user's own OBS version; pre-flight validates and warns on unknown IDs. |
 | Chain includes a VST filter | Not supported in v1: stripped with a loud warning. v2 feature. |
 | NVIDIA noise suppression needs an external runtime | v1 promises Speex/RNNoise. In OBS 32 NVIDIA's filter lives in the separate `nv-filters` module, which v1 doesn't load, so a chain using it imports without it (warned). Loading `nv-filters` is a v2 idea. |
-| Trademark ("OBS" in name) | OBS Forum Resource and IP Policy (Jan 2026) asks tools to avoid the OBS acronym in names. Ask the OBS team before launch; fallback: Knobs. |
+| Trademark ("OBS" in name) | OBS Forum Resource and IP Policy (Jan 2026) asks tools to avoid the OBS acronym in names. Keeping the name without asking; if the OBS team asks for a change, the fallback is Knobs. The name is one constant in code. |
 | OBS forum rules on AI-assisted code | Policy requires an AI-use disclaimer and discourages listing resources mostly written by AI. Include the disclaimer; be ready to explain authorship. |
 | GPL obligations | Fine: knOBS is GPL-2.0-or-later (same as libobs) and open source. |
 
@@ -255,6 +254,7 @@ Exact key names are verified against the installed OBS version in M2.
 ### Revision notes — Rev 5 (2026-10-04)
 
 - M1 done. With the iD4, knOBS measured 88.1 ms from mic to cable and OBS 87.7 ms on the same cable input. One knOBS run stepped up 10.6 ms partway through. libobs's monitor never corrects that for a mic, so it's a risk for long sessions; added an M3 item to measure it over hours.
+- Name: keep knOBS without asking the OBS team first, and reconsider only if they ask. Dropped the M4 name-check item.
 - The monitor ignoring mute is a 32.2.0 change, not long-standing. Before 32.1, mute and push-to-talk both silenced the monitor. Added the version history to the M1 findings.
 - Added OBS 33.0 notes from 33.0.0-beta6. Monitoring becomes on or off: Monitor Only is gone and the monitoring-type setter is deprecated. The saved monitoring key changes, which `LoadSourceJson` has to handle. Added an M2 item to support 33.0 once it's released.
 
