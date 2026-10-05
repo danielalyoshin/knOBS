@@ -29,6 +29,7 @@
 #include "audio/live_chain.h"
 #include "common/console.h"
 #include "common/envelope.h"
+#include "common/obs_import.h"
 #include "common/push_source.h"
 #include "common/random.h"
 #include "common/text_file.h"
@@ -43,7 +44,6 @@ using namespace knobs::tools;
 using namespace std::chrono_literals;
 namespace fs = std::filesystem;
 
-constexpr uint32_t kSampleRate = 48000;           // The session's default.
 constexpr uint64_t kBinNs = 1'000'000;            // Envelope resolution.
 constexpr uint64_t kMaxDelayNs = 1'000'000'000;   // Latencies searched: 0 to 1 s.
 constexpr int kWindows = 4;                       // Separate estimates per measurement.
@@ -57,8 +57,8 @@ std::string Usage() {
   return std::format(R"(Usage: knobs-live <mode> [options]
 
 Runs {0}'s live audio path with no OBS process: a source through an OBS
-filter chain, monitored by libobs into a virtual cable. Until import lands,
-the chain is the mic with one gain filter.
+filter chain, monitored by libobs into a virtual cable. The chain is the mic
+imported from OBS (--import), or the mic with one gain filter.
 
 Modes (pick one):
   --list-devices           List recording and playback devices. Opens none.
@@ -76,9 +76,16 @@ Modes (pick one):
                            --listen. Keep talking or tapping the mic while it runs.
 
 Options:
-  --output <name|id>       Playback device to monitor to. Default: "CABLE Input".
+  --import                 Use the mic from OBS's active profile and scene collection,
+                           with its filters and source-level state, at the profile's
+                           sample rate and channels.
+{2}
+  --output <name|id>       Playback device to monitor to. Default: the OBS profile's
+                           monitoring device with --import, else "CABLE Input".
   --listen <name|id>       Recording side of that cable. Default: "CABLE Output".
-  --mic <name|id>          Default: "default", the default communications device.
+  --mic <name|id>          The mic for the mic + gain chain, and the one --measure-mic
+                           compares with. Default: the imported mic's device with
+                           --import, else "default", the default communications device.
   --gain-db <x>            The gain filter's setting (default 0).
   --source <file.json>     Use this OBS source object (one entry of a scene
                            collection's "sources") instead of the mic + gain chain.
@@ -92,7 +99,7 @@ Options:
 
 Names match case-insensitively on any part; --list-devices shows them.
 )",
-                     kDisplayName, kMinMeasureSeconds);
+                     kDisplayName, kMinMeasureSeconds, kImportUsage);
 }
 
 enum class Mode { kNone, kListDevices, kMeasureOutput, kMeasureCable, kRun, kMeasureMic };
@@ -100,10 +107,13 @@ enum class Mode { kNone, kListDevices, kMeasureOutput, kMeasureCable, kRun, kMea
 struct Options {
   Mode mode = Mode::kNone;
   int seconds = 0;
-  std::string output = "CABLE Input";
+  // Empty: the default, which depends on --import.
+  std::string output;
   std::string listen = "CABLE Output";
-  std::string mic = "default";
+  std::string mic;
   double gain_db = 0;
+  bool import = false;
+  ImportArgs import_args;
   std::optional<fs::path> source;
   bool external = false;
   bool force = false;
@@ -135,6 +145,11 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     } else if (arg == L"--external") {
       options.external = true;
       takes_value = false;
+    } else if (arg == L"--import") {
+      options.import = true;
+      takes_value = false;
+    } else if (bool bad = false; ParseImportArg(arg, value, options.import_args, bad)) {
+      ok = !bad;
     } else if (arg == L"--force") {
       options.force = true;
       takes_value = false;
@@ -173,10 +188,19 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
   }
   if (options.mode == Mode::kNone) return std::nullopt;
   if (options.external && options.mode != Mode::kMeasureMic) return std::nullopt;
+  // One chain, and the import options only with --import.
+  const bool import_args = options.import_args.config_dir || !options.import_args.pick.empty();
+  if ((options.import && options.source) || (import_args && !options.import)) return std::nullopt;
   return options;
 }
 
 // --- Helpers ------------------------------------------------------------------
+
+// The source to run, as an OBS source object.
+struct Chain {
+  std::string json;
+  bool load_callbacks = false;  // See audio::LoadOptions.
+};
 
 std::atomic<bool> g_interrupted = false;
 
@@ -335,24 +359,26 @@ void MeasureClicks(const Options& options, const audio::AudioDevice& listen, uin
 // when the cable's recording side has it: the chain, the monitor, the
 // playback buffer and the cable, i.e. everything after the capture device.
 void MeasureOutput(runtime::ObsHost& host, const Options& options, const audio::AudioDevice& listen,
-                   const std::string& json) {
+                   const Chain& source) {
   const runtime::ObsApi& api = host.api();
+  const uint32_t rate = host.session().options().samples_per_sec;
   RegisterPushSource(api);
-  auto chain = audio::LiveChain::Start(api, host.session(), json, kPushSourceId);
+  auto chain = audio::LiveChain::Start(api, host.session(), source.json,
+                                       {.type_id = kPushSourceId, .load_callbacks = source.load_callbacks});
   if (!chain) return Check(false, "chain", chain.error());
   ReportChain(audio::DescribeChain(api, (*chain)->source()));
   Report(Outcome::kNote, "measure",
          std::format("pushing clicks through the chain for {} s (a push source stands in for the mic)",
                      options.seconds));
-  std::vector<float> left(kSampleRate / 100), right(kSampleRate / 100);
+  std::vector<float> left(rate / 100), right(rate / 100);
   const float* planes[] = {left.data(), right.data()};
-  MeasureClicks(options, listen, kSampleRate, 2, std::format("from push to \"{}\"", listen.name),
+  MeasureClicks(options, listen, rate, 2, std::format("from push to \"{}\"", listen.name),
                 [&](const float* interleaved, uint32_t frames, uint64_t first_ns) {
                   for (uint32_t i = 0; i < frames; ++i) {
                     left[i] = interleaved[2 * i];
                     right[i] = interleaved[2 * i + 1];
                   }
-                  PushAudio(api, (*chain)->source(), planes, 2, frames, kSampleRate, first_ns);
+                  PushAudio(api, (*chain)->source(), planes, 2, frames, rate, first_ns);
                 });
 }
 
@@ -385,14 +411,14 @@ void OnChainAudio(void* param, obs_source_t*, const audio_data* audio, bool) {
 // Opens the mic: runs it through the chain into the cable, and shows what
 // the chain outputs next to what arrives on the cable's recording side.
 void RunMic(runtime::ObsHost& host, const Options& options, const audio::AudioDevice& mic,
-            const audio::AudioDevice& listen, const std::string& json) {
+            const audio::AudioDevice& listen, const Chain& source) {
   const runtime::ObsApi& api = host.api();
   auto recorder = EndpointRecorder::Start(listen.id, Envelope(NowNs(), kBinNs, 0));
   if (!recorder) return Check(false, "listen", recorder.error());
   Report(Outcome::kNote, "mic",
          std::format("opening \"{}\" for {} s (Ctrl+C stops); other apps can record it from \"{}\"", mic.name,
                      options.seconds, listen.name));
-  auto chain = audio::LiveChain::Start(api, host.session(), json);
+  auto chain = audio::LiveChain::Start(api, host.session(), source.json, {.load_callbacks = source.load_callbacks});
   if (!chain) return Check(false, "chain", chain.error());
   ReportChain(audio::DescribeChain(api, (*chain)->source()));
   PeakHold meter;
@@ -422,7 +448,7 @@ void RunMic(runtime::ObsHost& host, const Options& options, const audio::AudioDe
 // measures how much later the cable has the same sound. Works the same
 // whether knOBS or OBS feeds the cable.
 void MeasureMic(runtime::ObsHost& host, const Options& options, const audio::AudioDevice& mic,
-                const audio::AudioDevice& listen, const std::string& json) {
+                const audio::AudioDevice& listen, const Chain& source) {
   const runtime::ObsApi& api = host.api();
   const uint64_t origin = NowNs();
   const uint64_t duration_ns = uint64_t{static_cast<unsigned>(options.seconds)} * 1'000'000'000;
@@ -435,7 +461,7 @@ void MeasureMic(runtime::ObsHost& host, const Options& options, const audio::Aud
   if (!cable_recorder) return Check(false, "listen", cable_recorder.error());
   std::unique_ptr<audio::LiveChain> chain;
   if (!options.external) {
-    auto started = audio::LiveChain::Start(api, host.session(), json);
+    auto started = audio::LiveChain::Start(api, host.session(), source.json, {.load_callbacks = source.load_callbacks});
     if (!started) return Check(false, "chain", started.error());
     chain = std::move(*started);
     ReportChain(audio::DescribeChain(api, chain->source()));
@@ -495,10 +521,23 @@ bool CheckCable(const Options& options, const audio::AudioDevice& output, const 
   return true;
 }
 
-void RunMode(runtime::ObsHost& host, const Options& options, const std::vector<audio::AudioDevice>& mics,
-             const std::vector<audio::AudioDevice>& outputs) {
+void RunMode(runtime::ObsHost& host, const Options& options, const std::optional<import::ActiveObsConfig>& config,
+             const std::vector<audio::AudioDevice>& mics, const std::vector<audio::AudioDevice>& outputs) {
   const runtime::ObsApi& api = host.api();
-  auto output = audio::FindDevice(outputs, options.output, "playback device");
+  Chain chain;
+  std::string output_query = options.output.empty() ? "CABLE Input" : options.output;
+  std::string mic_query = options.mic.empty() ? "default" : options.mic;
+  if (config) {
+    auto imported = ImportMic(api, *config, options.import_args);
+    if (!imported) return Check(false, "import", imported.error());
+    chain = {std::move(imported->source_json), imported->load_callbacks()};
+    if (options.output.empty()) output_query = config->audio.monitoring_device_id;
+    if (options.mic.empty()) mic_query = imported->mic.device_id;
+    if (!audio::FindDevice(mics, imported->mic.device_id, "recording device")) {
+      Report(Outcome::kWarn, "mic", std::format("the mic's device ({}) isn't connected", imported->mic.device_id));
+    }
+  }
+  auto output = audio::FindDevice(outputs, output_query, "playback device");
   auto listen = audio::FindDevice(mics, options.listen, "recording device");
   if (!output || !listen) {
     return Check(false, "devices",
@@ -506,7 +545,7 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::vector<a
   }
   std::optional<audio::AudioDevice> mic;
   if (options.mode == Mode::kRun || options.mode == Mode::kMeasureMic) {
-    auto found = audio::FindDevice(mics, options.mic, "recording device");
+    auto found = audio::FindDevice(mics, mic_query, "recording device");
     if (!found) return Check(false, "devices", found.error());
     mic = *found;
   }
@@ -515,13 +554,12 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::vector<a
                      output->name, listen->name));
   if (!CheckCable(options, *output, *listen)) return;
 
-  std::string json;
   if (options.source) {
     auto text = ReadText(*options.source);
     if (!text) return Check(false, "chain", text.error());
-    json = std::move(*text);
-  } else {
-    json = audio::MicWithGainSourceJson(mic ? mic->id : "default", options.gain_db);
+    chain.json = std::move(*text);
+  } else if (!config) {
+    chain.json = audio::MicWithGainSourceJson(mic ? mic->id : "default", options.gain_db);
   }
   if (!options.external) {
     const auto set = audio::SetMonitoringDevice(api, *output);
@@ -530,13 +568,13 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::vector<a
 
   switch (options.mode) {
     case Mode::kMeasureOutput:
-      return MeasureOutput(host, options, *listen, json);
+      return MeasureOutput(host, options, *listen, chain);
     case Mode::kMeasureCable:
       return MeasureCable(options, *output, *listen);
     case Mode::kRun:
-      return RunMic(host, options, *mic, *listen, json);
+      return RunMic(host, options, *mic, *listen, chain);
     case Mode::kMeasureMic:
-      return MeasureMic(host, options, *mic, *listen, json);
+      return MeasureMic(host, options, *mic, *listen, chain);
     default:
       return;
   }
@@ -549,16 +587,33 @@ void PrintDevices(std::string_view heading, const std::vector<audio::AudioDevice
 
 int Run(const Options& options) {
   Print(std::format("{} live audio\n", kDisplayName));
+  auto install = options.obs_dir ? runtime::InspectObsInstall(*options.obs_dir) : runtime::FindObsInstall();
+  if (!install) {
+    Check(false, "find OBS", install.error());
+    return kExitFail;
+  }
   runtime::HostOptions host_options;
-  host_options.obs_dir = options.obs_dir;
+  host_options.obs_dir = install->root;
   host_options.log_prefix = L"live ";
   host_options.verbose = options.verbose;
+  std::optional<import::ActiveObsConfig> config;
+  if (options.import) {
+    auto found = FindObsConfig(options.import_args, *install);
+    if (!found) {
+      Check(false, "OBS settings", found.error());
+      return kExitFail;
+    }
+    config = std::move(*found);
+    UseProfileAudio(*config, host_options);
+  }
   auto host = runtime::ObsHost::Start(host_options);
   if (!host) {
     Check(false, "start libobs", host.error());
     return kExitFail;
   }
-  Check(true, "start libobs", std::format("OBS {}, no video", (*host)->install().version.ToString()));
+  Check(true, "start libobs",
+        std::format("OBS {}, {} Hz, {} channel(s), no video", (*host)->install().version.ToString(),
+                    host_options.samples_per_sec, get_audio_channels(host_options.speakers)));
 
   const auto mics = audio::ListMicDevices((*host)->api());
   const auto outputs = audio::ListMonitoringDevices((*host)->api());
@@ -566,7 +621,7 @@ int Run(const Options& options) {
     PrintDevices("Recording devices (--mic, --listen):", mics);
     PrintDevices("Playback devices (--output):", outputs);
   } else {
-    RunMode(**host, options, mics, outputs);
+    RunMode(**host, options, config, mics, outputs);
   }
   return FinishRun(**host);
 }

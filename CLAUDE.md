@@ -15,28 +15,30 @@ Run these from a Developer PowerShell for VS, which puts `cmake` and `ctest` on 
 ```powershell
 cmake --preset x64            # configure
 cmake --build --preset debug  # or: release
-ctest --preset debug          # unit tests, smoke test, harness (the last two skip if OBS isn't installed)
+ctest --preset debug          # unit tests, then smoke, harness and import tests (these skip if OBS isn't installed)
 ```
 
 The dev tools in `build\x64\<config>\` each take `--help`:
 - `knobs-smoke`: the M0 bootstrap check. Options include `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`).
-- `knobs-harness`: pushes a WAV (or a built-in test signal) through a filter chain offline and checks that runs are bit-identical. `--source <json>` takes an OBS source object; `--out` writes the result. It opens no audio devices.
-- `knobs-live`: the live path into a virtual cable. `--list-devices`, `--measure-output` and `--measure-cable` don't use the mic. `--measure-output` and `--measure-cable` play test clicks into VB-Cable and refuse to run while another app is using the cable. `--run` and `--measure-mic` open the mic.
+- `knobs-import`: imports the mic from OBS's active profile and scene collection and reports each step: settings found, mics, pre-flight warnings, the chain libobs loads. `--obs-config` points it at another OBS settings folder, `--pick` chooses among several mics, `--save` writes the source object. It opens no audio devices.
+- `knobs-harness`: pushes a WAV (or a built-in test signal) through a filter chain offline and checks that runs are bit-identical. `--import` uses the imported mic's chain; `--source <json>` takes an OBS source object; `--out` writes the result. It opens no audio devices.
+- `knobs-live`: the live path into a virtual cable. `--import` runs the imported mic, monitored to the profile's monitoring device. `--list-devices`, `--measure-output` and `--measure-cable` don't use the mic. `--measure-output` and `--measure-cable` play test clicks into VB-Cable and refuse to run while another app is using the cable. `--run` and `--measure-mic` open the mic.
 
 Don't open the mic without the user's go-ahead.
 
 ## Layout
 - `src/runtime/`: finding OBS, the runtime copy, loading `obs.dll` and its function table, the libobs session, logging, and `ObsHost`, which runs all of those in order.
+- `src/import/`: reading OBS's settings (an INI reader that matches libobs's parser, the active profile and scene collection), finding the mics in a collection, and the pre-flight checks.
 - `src/audio/`: the live path. Device lists, and `LiveChain`, which loads a source through OBS's loader and monitors it.
 - `src/util/`: `Result`, UTF-8, JSON and Win32 helpers, knOBS's app folders.
-- `tools/common/`: code shared by the dev tools (console output, WAV and text files, the push source, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
-- `tools/smoke/`, `tools/harness/`, `tools/live/`: the dev tools above. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`.
-- `tests/`: unit tests. These don't need OBS.
+- `tools/common/`: code shared by the dev tools (console output, WAV and text files, the push source and offline runs, the tools' import steps, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
+- `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/live/`: the dev tools above. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`.
+- `tests/`: unit tests, which don't need OBS, and the import test, which runs `knobs-import` on the made-up OBS settings in `tests/fixtures/obs-config`.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
 
 ## Invariants
 - **Fidelity is the product.** Audio passes only through OBS's own filter code. No custom DSP and no "improvements".
-- **`%AppData%\obs-studio` is read-only.** knOBS keeps its own state in `%AppData%\knOBS` and `%LocalAppData%\knOBS`.
+- **`%AppData%\obs-studio` is read-only**, as is a portable OBS's `config` folder. knOBS keeps its own state in `%AppData%\knOBS` and `%LocalAppData%\knOBS`. Some libobs helpers write: `obs_data_create_from_json_file_safe` renames a backup over a broken file, so read files yourself and parse them with `obs_data_create_from_json`.
 - **Never load from the OBS install dir.** Load only from the shadow copy in `%LocalAppData%\knOBS\runtime\<obs-version>\`.
 - **No link-time libobs dependency.** Resolve exports into the function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`) with `GetProcAddress`. Add new libobs functions there. A missing export fails gracefully with a clear message.
 - **Load only `win-wasapi` and `obs-filters`.** No `obs-vst` in v1.

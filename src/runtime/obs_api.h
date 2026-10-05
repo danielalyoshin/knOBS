@@ -40,14 +40,32 @@ namespace knobs::runtime {
   X(obs_data_create)                          \
   X(obs_data_create_from_json)                \
   X(obs_data_release)                         \
+  X(obs_data_get_json)                        \
+  X(obs_data_has_user_value)                  \
+  X(obs_data_erase)                           \
   X(obs_data_set_string)                      \
   X(obs_data_set_double)                      \
   X(obs_data_set_int)                         \
+  X(obs_data_set_bool)                        \
+  X(obs_data_set_obj)                         \
+  X(obs_data_set_array)                       \
   X(obs_data_set_default_int)                 \
+  X(obs_data_get_string)                      \
+  X(obs_data_get_int)                         \
+  X(obs_data_get_bool)                        \
+  X(obs_data_get_obj)                         \
+  X(obs_data_get_array)                       \
+  X(obs_data_array_create)                    \
+  X(obs_data_array_release)                   \
+  X(obs_data_array_count)                     \
+  X(obs_data_array_item)                      \
+  X(obs_data_array_push_back)                 \
   /* Sources */                               \
   X(obs_register_source_s)                    \
+  X(obs_get_source_output_flags)              \
   X(obs_source_create_private)                \
   X(obs_load_private_source)                  \
+  X(obs_source_load2)                         \
   X(obs_source_release)                       \
   X(obs_source_get_id)                        \
   X(obs_source_get_name)                      \

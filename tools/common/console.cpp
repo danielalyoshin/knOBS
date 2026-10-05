@@ -21,7 +21,10 @@ void Print(std::string_view text) {
 }
 
 void Report(Outcome outcome, std::string_view step, std::string_view detail) {
-  const char* tag = outcome == Outcome::kOk ? "ok" : outcome == Outcome::kFail ? "FAIL" : "--";
+  const char* tag = outcome == Outcome::kOk     ? "ok"
+                    : outcome == Outcome::kFail ? "FAIL"
+                    : outcome == Outcome::kWarn ? "warn"
+                                                : "--";
   if (outcome == Outcome::kFail) g_failed = true;
   Print(std::format("[{:<4}] {:<18} {}\n", tag, step, detail));
 }

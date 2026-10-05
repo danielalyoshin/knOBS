@@ -25,6 +25,9 @@ target_include_directories(libobs_headers SYSTEM INTERFACE third_party/libobs)
 add_library(knobs_runtime STATIC
   src/audio/audio_devices.cpp
   src/audio/live_chain.cpp
+  src/import/mic_import.cpp
+  src/import/obs_config.cpp
+  src/import/obs_ini.cpp
   src/runtime/obs_api.cpp
   src/runtime/obs_host.cpp
   src/runtime/obs_install.cpp
@@ -48,6 +51,8 @@ target_link_libraries(knobs_runtime
 add_library(knobs_tools STATIC
   tools/common/console.cpp
   tools/common/envelope.cpp
+  tools/common/obs_import.cpp
+  tools/common/offline_chain.cpp
   tools/common/push_source.cpp
   tools/common/sha256.cpp
   tools/common/text_file.cpp
@@ -65,6 +70,9 @@ target_link_libraries(knobs-harness PRIVATE knobs_tools)
 add_executable(knobs-live tools/live/live_main.cpp tools/live/endpoints.cpp)
 target_link_libraries(knobs-live PRIVATE knobs_tools ole32)
 
+add_executable(knobs-import tools/import/import_main.cpp)
+target_link_libraries(knobs-import PRIVATE knobs_tools)
+
 add_executable(knobs-tests tests/unit_tests.cpp)
 target_link_libraries(knobs-tests PRIVATE knobs_tools delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
@@ -72,8 +80,14 @@ target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
-# The tests below need OBS installed and exit with 77 (skipped) when it isn't.
-# Neither opens the mic or any other audio device.
+# The tests below need OBS installed and skip when it isn't. None of them
+# opens the mic or any other audio device, and the import test reads a
+# made-up OBS settings folder, not the user's.
 add_test(NAME smoke COMMAND knobs-smoke)
 add_test(NAME harness COMMAND knobs-harness --runs 3)
 set_tests_properties(smoke harness PROPERTIES SKIP_RETURN_CODE 77)
+add_test(NAME import
+  COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-import>
+          -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_fixture.cmake)
+set_tests_properties(import PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")

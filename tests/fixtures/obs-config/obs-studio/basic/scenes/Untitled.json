@@ -1,0 +1,40 @@
+{
+    "name": "Untitled",
+    "current_scene": "Scene",
+    "current_program_scene": "Scene",
+    "scene_order": [
+        {
+            "name": "Scene"
+        }
+    ],
+    "AuxAudioDevice1": {
+        "prev_ver": 537001986,
+        "name": "Decoy Mic",
+        "id": "wasapi_input_capture",
+        "versioned_id": "wasapi_input_capture",
+        "settings": {
+            "device_id": "default"
+        },
+        "flags": 0,
+        "volume": 1.0,
+        "balance": 0.5,
+        "enabled": true,
+        "monitoring_type": 2
+    },
+    "sources": [
+        {
+            "prev_ver": 537001986,
+            "name": "Scene",
+            "id": "scene",
+            "versioned_id": "scene",
+            "settings": {
+                "id_counter": 0,
+                "custom_size": false,
+                "items": []
+            }
+        }
+    ],
+    "groups": [],
+    "modules": {},
+    "version": 2
+}

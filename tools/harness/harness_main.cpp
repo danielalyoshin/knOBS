@@ -3,12 +3,8 @@
 // knobs-harness: runs audio through an OBS filter chain offline and checks
 // that the output is bit-identical from run to run.
 //
-// No audio device is opened. A push source (tools/common/push_source.h)
-// stands in for the mic: it outputs the input in fixed-size chunks with
-// synthetic, gapless timestamps, and libobs runs the chain on this thread
-// before each push returns. An audio capture callback on the source, the hook
-// libobs's monitor uses, collects what the filters output. Each run loads the
-// chain afresh, so no filter state carries over.
+// No audio device is opened: see RunChainOffline (common/offline_chain.h).
+// Each run loads the chain afresh, so no filter state carries over.
 
 #include <windows.h>
 
@@ -27,6 +23,8 @@
 #include "app_info.h"
 #include "audio/live_chain.h"
 #include "common/console.h"
+#include "common/obs_import.h"
+#include "common/offline_chain.h"
 #include "common/push_source.h"
 #include "common/sha256.h"
 #include "common/text_file.h"
@@ -42,12 +40,11 @@ using namespace knobs;
 using namespace knobs::tools;
 namespace fs = std::filesystem;
 
+// The built-in test signal's rate.
 constexpr uint32_t kSampleRate = 48000;
 // Pushed after the input so filters that hold audio back flush it (noise
 // suppression works in 10 ms segments).
-constexpr uint32_t kTailFrames = kSampleRate;
-// Where the synthetic timestamps start. Only their spacing matters.
-constexpr uint64_t kFirstTimestampNs = 1'000'000'000;
+constexpr uint32_t kTailSeconds = 1;
 constexpr int kMaxRuns = 100;
 
 // Every audio filter obs-filters 32.2 registers, once, mostly at its
@@ -79,17 +76,21 @@ Runs audio through an OBS filter chain offline, with the installed OBS's own
 filter code and no audio devices, and checks that every run's output is
 bit-identical.
 
-  --in <file.wav>          48 kHz 32-bit float, mono or stereo. Default: a built-in
-                           12 s test signal.
+  --in <file.wav>          32-bit float, mono or stereo, at the chain's sample rate.
+                           Default: a built-in 12 s, 48 kHz test signal.
+  --import                 The chain: the mic from OBS's active profile and scene
+                           collection, at the profile's sample rate and channels.
+                           Its filters and the source-level state libobs applies
+                           before them (balance, Mono) are used; its device isn't.
+{}
   --source <file.json>     The chain, as an OBS source object (one entry of a scene
-                           collection's "sources"). Its filters and the source-level
-                           state libobs applies before them (balance, Mono) are used;
-                           its source type isn't.
+                           collection's "sources"), used the same way.
   --chain coverage|gain    A built-in chain instead: every obs-filters audio filter
                            (default), or {}'s M1 chain, one gain filter at 0 dB.
-  --out <file.wav>         Write the output: 32-bit float, stereo, 48 kHz. It's what
-                           the filters output, before the source's volume, which
-                           libobs applies afterwards (in the monitor and the mix).
+  --out <file.wav>         Write the output: 32-bit float at the chain's sample rate
+                           and channels. It's what the filters output, before the
+                           source's volume, which libobs applies afterwards (in the
+                           monitor and the mix).
   --save-input <file.wav>  Write the input, e.g. to reuse the built-in signal.
   --chunk <frames>         Frames per push (default 480: 10 ms, WASAPI's usual packet).
   --runs <n>               Runs to compare (default 3, at most {}).
@@ -99,11 +100,13 @@ bit-identical.
 After the input, {} s of silence is pushed so buffered filters flush, and the
 output keeps it.
 )",
-                     kDisplayName, kMaxRuns, kTailFrames / kSampleRate);
+                     kImportUsage, kDisplayName, kMaxRuns, kTailSeconds);
 }
 
 struct Options {
   std::optional<fs::path> in;
+  bool import = false;
+  ImportArgs import_args;
   std::optional<fs::path> source;
   std::string chain = "coverage";
   std::optional<fs::path> out;
@@ -126,7 +129,17 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
   for (int i = 1; i < argc; ++i) {
     const std::wstring_view arg = argv[i];
     const wchar_t* value = i + 1 < argc ? argv[i + 1] : nullptr;
-    if (!value && arg != L"--verbose") return std::nullopt;
+    if (arg == L"--verbose" || arg == L"--import") {
+      (arg == L"--verbose" ? options.verbose : options.import) = true;
+      continue;
+    }
+    bool bad = false;
+    if (ParseImportArg(arg, value, options.import_args, bad)) {
+      if (bad) return std::nullopt;
+      ++i;
+      continue;
+    }
+    if (!value) return std::nullopt;
     if (arg == L"--in") {
       options.in = fs::absolute(value);
     } else if (arg == L"--source") {
@@ -148,14 +161,14 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       options.runs = static_cast<int>(*runs);
     } else if (arg == L"--obs-dir") {
       options.obs_dir = fs::absolute(value);
-    } else if (arg == L"--verbose") {
-      options.verbose = true;
-      continue;
     } else {
       return std::nullopt;
     }
     ++i;
   }
+  // One chain, and the import options only with --import.
+  const bool import_args = options.import_args.config_dir || !options.import_args.pick.empty();
+  if ((options.import && options.source) || (import_args && !options.import)) return std::nullopt;
   return options;
 }
 
@@ -165,68 +178,35 @@ std::string Level(const std::vector<float>& samples) {
   return FormatPeak(peak);
 }
 
-// What the capture callback has collected, interleaved.
-struct Collected {
-  uint32_t channels = 0;
-  std::vector<float> samples;
-};
-
-void OnAudio(void* param, obs_source_t*, const audio_data* audio, bool) {
-  // Called on the pushing thread, from within obs_source_output_audio.
-  auto* out = static_cast<Collected*>(param);
-  const size_t base = out->samples.size();
-  out->samples.resize(base + size_t{audio->frames} * out->channels);
-  for (uint32_t c = 0; c < out->channels; ++c) {
-    const auto* plane = reinterpret_cast<const float*>(audio->data[c]);
-    if (!plane) continue;
-    for (uint32_t i = 0; i < audio->frames; ++i) out->samples[base + size_t{i} * out->channels + c] = plane[i];
-  }
-}
-
-// Loads the chain as a push source, pushes the input and the tail through
-// it, and returns the output.
-Result<Collected> RunOnce(const runtime::ObsApi& api, runtime::ObsSession& session, const std::string& json,
-                          const FloatAudio& input, uint32_t chunk, bool report_chain) {
-  auto source = audio::LoadSourceJson(api, json, kPushSourceId);
-  if (!source) return Error{source.error()};
-  if (report_chain) {
-    const audio::ChainInfo chain = audio::DescribeChain(api, *source);
-    ReportChain(chain);
-    if (chain.volume != 1.0f) {
-      Report(Outcome::kNote, "volume",
-             std::format("the output leaves out the source's volume ({:.2f}); libobs applies it afterwards",
-                         chain.volume));
-    }
-  }
-
-  Collected collected;
-  collected.channels = get_audio_channels(session.options().speakers);
-  api.obs_source_add_audio_capture_callback(*source, OnAudio, &collected);
-
-  const size_t in_frames = input.frames();
-  const size_t total = (in_frames + kTailFrames + chunk - 1) / chunk * chunk;
-  std::vector<std::vector<float>> planes(input.channels, std::vector<float>(chunk));
-  std::vector<const float*> pointers;
-  for (const auto& plane : planes) pointers.push_back(plane.data());
-  for (size_t start = 0; start < total; start += chunk) {
-    for (uint32_t c = 0; c < input.channels; ++c) {
-      for (size_t i = 0; i < chunk; ++i) {
-        const size_t frame = start + i;
-        planes[c][i] = frame < in_frames ? input.samples[frame * input.channels + c] : 0.0f;
-      }
-    }
-    const uint64_t timestamp = kFirstTimestampNs + start * 1'000'000'000 / kSampleRate;
-    PushAudio(api, *source, pointers.data(), input.channels, chunk, kSampleRate, timestamp);
-  }
-
-  api.obs_source_remove_audio_capture_callback(*source, OnAudio, &collected);
-  api.obs_source_release(*source);
-  session.DrainDestroyQueue();
-  return collected;
-}
-
 int Run(const Options& options) {
   Print(std::format("{} offline harness\n", kDisplayName));
+
+  // libobs. An import decides its audio format, so that comes first.
+  if (!options.obs_dir && runtime::ObsInstallCandidates().empty()) {
+    Report(Outcome::kNote, "find OBS", "OBS isn't installed");
+    Print("SKIP (OBS isn't installed)\n");
+    return kExitSkip;
+  }
+  auto install = options.obs_dir ? runtime::InspectObsInstall(*options.obs_dir) : runtime::FindObsInstall();
+  if (!install) {
+    Check(false, "find OBS", install.error());
+    return kExitFail;
+  }
+  runtime::HostOptions host_options;
+  host_options.obs_dir = install->root;
+  host_options.log_prefix = L"harness ";
+  host_options.verbose = options.verbose;
+  std::optional<import::ActiveObsConfig> config;
+  if (options.import) {
+    auto found = FindObsConfig(options.import_args, *install);
+    if (!found) {
+      Check(false, "OBS settings", found.error());
+      return kExitFail;
+    }
+    config = std::move(*found);
+    UseProfileAudio(*config, host_options);
+  }
+  const uint32_t rate = host_options.samples_per_sec;
 
   // Input.
   FloatAudio input;
@@ -236,48 +216,31 @@ int Run(const Options& options) {
       Check(false, "input", wav.error());
       return kExitFail;
     }
-    if (wav->sample_rate != kSampleRate || wav->channels > 2) {
+    if (wav->sample_rate != rate || wav->channels > 2) {
       Check(false, "input",
-            std::format("{} is {} Hz with {} channels; the harness takes 48000 Hz mono or stereo.",
-                        ToUtf8(*options.in), wav->sample_rate, wav->channels));
+            std::format("{} is {} Hz with {} channels; the harness takes {} Hz mono or stereo here.",
+                        ToUtf8(*options.in), wav->sample_rate, wav->channels, rate));
       return kExitFail;
     }
     input = std::move(*wav);
+  } else if (rate != kSampleRate) {
+    Check(false, "input",
+          std::format("The built-in test signal is {} Hz, and the OBS profile runs at {} Hz. Pass --in with a "
+                      "{} Hz file.",
+                      kSampleRate, rate, rate));
+    return kExitFail;
   } else {
     input = MakeTestSignal();
   }
   Report(Outcome::kNote, "input",
          std::format("{}: {:.2f} s, {} channel(s), peak {}",
                      options.in ? ToUtf8(*options.in) : std::string("built-in test signal"),
-                     static_cast<double>(input.frames()) / kSampleRate, input.channels, Level(input.samples)));
+                     static_cast<double>(input.frames()) / rate, input.channels, Level(input.samples)));
   if (options.save_input) {
     const auto saved = WriteFloatWav(*options.save_input, input);
     Check(saved.ok(), "save input", saved.ok() ? ToUtf8(*options.save_input) : saved.error());
   }
 
-  // Chain.
-  std::string json;
-  if (options.source) {
-    auto text = ReadText(*options.source);
-    if (!text) {
-      Check(false, "chain", text.error());
-      return kExitFail;
-    }
-    json = std::move(*text);
-  } else {
-    json = options.chain == "gain" ? audio::MicWithGainSourceJson("default", 0.0) : kCoverageChain;
-  }
-
-  // libobs.
-  if (!options.obs_dir && runtime::ObsInstallCandidates().empty()) {
-    Report(Outcome::kNote, "find OBS", "OBS isn't installed");
-    Print("SKIP (OBS isn't installed)\n");
-    return kExitSkip;
-  }
-  runtime::HostOptions host_options;
-  host_options.obs_dir = options.obs_dir;
-  host_options.log_prefix = L"harness ";
-  host_options.verbose = options.verbose;
   auto host = runtime::ObsHost::Start(host_options);
   if (!host) {
     Check(false, "start libobs", host.error());
@@ -285,47 +248,79 @@ int Run(const Options& options) {
   }
   const runtime::ObsApi& api = (*host)->api();
   Check(true, "start libobs",
-        std::format("OBS {}, no video, no audio devices", (*host)->install().version.ToString()));
+        std::format("OBS {}, {} Hz, {} channel(s), no video, no audio devices", install->version.ToString(),
+                    rate, get_audio_channels(host_options.speakers)));
   RegisterPushSource(api);
+
+  // Chain.
+  std::string json;
+  bool load_callbacks = false;
+  if (config) {
+    auto imported = ImportMic(api, *config, options.import_args);
+    if (!imported) {
+      Check(false, "import", imported.error());
+      return FinishRun(**host);
+    }
+    json = std::move(imported->source_json);
+    load_callbacks = imported->load_callbacks();
+  } else if (options.source) {
+    auto text = ReadText(*options.source);
+    if (!text) {
+      Check(false, "chain", text.error());
+      return FinishRun(**host);
+    }
+    json = std::move(*text);
+  } else {
+    json = options.chain == "gain" ? audio::MicWithGainSourceJson("default", 0.0) : kCoverageChain;
+  }
 
   // Runs. Stops at the first one that fails; earlier failures, such as
   // --save-input's, don't stop them.
-  std::optional<Collected> first;
+  std::optional<FloatAudio> first;
   std::string first_hash;
   bool run_failed = false;
   for (int run = 1; run <= options.runs && !run_failed; ++run) {
     const auto started = std::chrono::steady_clock::now();
-    auto output = RunOnce(api, (*host)->session(), json, input, options.chunk, run == 1);
+    auto result = RunChainOffline(api, (*host)->session(), json, load_callbacks, input, options.chunk,
+                                  kTailSeconds * rate);
     const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
-    if (!output) {
-      Check(false, "load chain", output.error());
+    if (!result) {
+      Check(false, "load chain", result.error());
       break;
     }
-    const std::string hash = Sha256Hex(output->samples.data(), output->samples.size() * sizeof(float));
-    const double out_seconds = static_cast<double>(output->samples.size() / output->channels) / kSampleRate;
+    if (run == 1) {
+      ReportChain(result->chain);
+      if (result->chain.volume != 1.0f) {
+        Report(Outcome::kNote, "volume",
+               std::format("the output leaves out the source's volume ({:.2f}); libobs applies it afterwards",
+                           result->chain.volume));
+      }
+    }
+    FloatAudio& output = result->output;
+    const std::string hash = Sha256Hex(output.samples.data(), output.samples.size() * sizeof(float));
+    const double out_seconds = static_cast<double>(output.frames()) / rate;
     const std::string step = std::format("run {}", run);
     if (hash.empty()) {
       Check(false, step, "couldn't hash the output");
       run_failed = true;
     } else if (!first) {
-      run_failed = output->samples.empty();
+      run_failed = output.samples.empty();
       Check(!run_failed, step,
-            std::format("{:.2f} s out in {:.2f} s ({:.0f}x real time), peak {}, sha256 {}", out_seconds,
-                        seconds, out_seconds / seconds, Level(output->samples), hash));
-      first = std::move(*output);
+            std::format("{:.2f} s out in {:.2f} s ({:.0f}x real time), peak {}, sha256 {}", out_seconds, seconds,
+                        out_seconds / seconds, Level(output.samples), hash));
+      first = std::move(output);
       first_hash = hash;
     } else {
-      const bool same = hash == first_hash && output->samples.size() == first->samples.size();
+      const bool same = hash == first_hash && output.samples.size() == first->samples.size();
       run_failed = !same;
       Check(same, step,
             same ? std::format("bit-identical to run 1 ({:.2f} s)", seconds)
-                 : std::format("differs from run 1: {} frames, sha256 {}",
-                               output->samples.size() / output->channels, hash));
+                 : std::format("differs from run 1: {} frames, sha256 {}", output.frames(), hash));
     }
   }
 
   if (first && options.out) {
-    const auto written = WriteFloatWav(*options.out, {kSampleRate, first->channels, first->samples});
+    const auto written = WriteFloatWav(*options.out, *first);
     Check(written.ok(), "output", written.ok() ? ToUtf8(*options.out) : written.error());
   }
   return FinishRun(**host);

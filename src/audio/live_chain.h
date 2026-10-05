@@ -17,19 +17,24 @@ namespace knobs::audio {
 // collection saves for each source).
 std::string MicWithGainSourceJson(std::string_view device_id, double gain_db);
 
+struct LoadOptions {
+  // If not empty, replaces the source's type and keeps everything else,
+  // filters included.
+  std::string_view type_id;
+  // Runs obs_source_load2 after loading, which calls the source's and its
+  // filters' `load` callbacks. obs_load_sources does that for a scene
+  // collection's "sources", but OBS's frontend doesn't for global audio
+  // devices (Mic/Aux), so this follows where the mic came from
+  // (import::ImportedMic::load_callbacks).
+  bool load_callbacks = false;
+};
+
 // Loads an OBS source object with libobs's own loader
 // (obs_load_private_source), which recreates the source, its filters in order
 // and its source-level state (volume, balance, Mono, sync offset). Monitoring
-// is off afterwards, whatever the JSON says. A non-empty `type_id` replaces the
-// source's type and keeps everything else, filters included. Returns a new
-// reference.
-//
-// Doesn't call obs_source_load2, which runs the source's and its filters'
-// `load` callbacks. OBS's frontend doesn't either for global audio devices
-// (Mic/Aux), but obs_load_sources does for a scene collection's "sources".
-// Import calls it for those, to match.
+// is off afterwards, whatever the JSON says. Returns a new reference.
 Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_view json,
-                                     std::string_view type_id = {});
+                                     const LoadOptions& options = {});
 
 // What a loaded source will do to its audio, as libobs reports it.
 struct ChainInfo {
@@ -68,7 +73,7 @@ class LiveChain {
   static Result<std::unique_ptr<LiveChain>> Start(const runtime::ObsApi& api,
                                                   runtime::ObsSession& session,
                                                   std::string_view source_json,
-                                                  std::string_view type_id = {});
+                                                  const LoadOptions& options = {});
   // Stops monitoring, releases the source and waits until it's destroyed.
   ~LiveChain();
   LiveChain(const LiveChain&) = delete;

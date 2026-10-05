@@ -26,6 +26,10 @@ struct HostOptions {
   // Also print the log to stderr, debug lines included.
   bool verbose = false;
   VideoMode video = VideoMode::kNone;
+  // The format libobs mixes and filters at (obs_reset_audio). An import
+  // takes it from the OBS profile.
+  uint32_t samples_per_sec = 48000;
+  speaker_layout speakers = SPEAKERS_STEREO;
 };
 
 // libobs up and running: finds the OBS install, makes sure its runtime copy

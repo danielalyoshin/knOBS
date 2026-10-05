@@ -23,6 +23,9 @@
 #include "common/envelope.h"
 #include "common/sha256.h"
 #include "common/wav.h"
+#include "import/mic_import.h"
+#include "import/obs_config.h"
+#include "import/obs_ini.h"
 #include "runtime/obs_api.h"
 #include "runtime/obs_install.h"
 #include "runtime/obs_log.h"
@@ -424,6 +427,181 @@ TEST(MicSourceJsonQuotesTheDevice) {
   CHECK(json.find(R"("device_id": "{0.0.1}.{\"odd\"}")") != std::string::npos);
   CHECK(json.find(R"("db": -3.5)") != std::string::npos);
   CHECK(json.find(R"("id": "gain_filter")") != std::string::npos);
+}
+
+// --- OBS settings --------------------------------------------------------------
+
+TEST(IniReadsLikeLibobs) {
+  const auto ini = import::ObsIni::Parse(
+      "\xEF\xBB\xBF"
+      "ignored=before any section\r\n"
+      "[Basic]\r\n"
+      "Profile=Streaming Voice\r\n"
+      "  # a comment\n"
+      "Key With Space = padded \r\n"
+      "no equals sign\n"
+      "Path=C:\\\\Users\\\\me\\nnext\\tab\n"
+      "Empty=\n"
+      "Twice=first\n"
+      "Twice=second\n"
+      "[Video]Inline=after the header\n"
+      "[Basic]\n"
+      "SceneCollection=Main\n");
+  // A repeated section replaces the earlier one, as libobs's lookup finds the
+  // last.
+  CHECK(!ini.Get("Basic", "Profile"));
+  CHECK(ini.Get("Basic", "SceneCollection") == "Main");
+  CHECK(ini.Get("Video", "Inline") == "after the header");
+  CHECK(!ini.Get("General", "ignored"));
+  CHECK(!ini.Get("Missing", "Profile"));
+
+  const auto first = import::ObsIni::Parse(
+      "[Basic]\nKey With Space = padded \nno equals sign\nPath=C:\\\\Users\\\\me\\nnext\\tab\nEmpty=\n"
+      "Twice=first\nTwice=second\n#Commented=1\n");
+  CHECK(first.Get("Basic", "Key With Space ") == " padded ");
+  CHECK(!first.Get("Basic", "no equals sign"));
+  CHECK(first.Get("Basic", "Path") == "C:\\Users\\me\nnext\\tab");
+  CHECK(first.Get("Basic", "Empty") == "");
+  CHECK(first.Get("Basic", "Twice") == "second");
+  CHECK(!first.Get("Basic", "#Commented"));
+
+  // An empty section name stops libobs's parser.
+  const auto stopped = import::ObsIni::Parse("[A]\nx=1\n[]\n[B]\ny=2\n");
+  CHECK(stopped.Get("A", "x") == "1");
+  CHECK(!stopped.Get("B", "y"));
+}
+
+// An OBS settings folder with the given files, relative to obs-studio\.
+void WriteObsConfig(const fs::path& root, std::initializer_list<std::pair<const char*, std::string_view>> files) {
+  for (const auto& [name, contents] : files) WriteFile(root / L"obs-studio" / name, contents);
+}
+
+TEST(ConfigRootIsPortableWithAMarker) {
+  TempDir dir(L"portable");
+  auto normal = import::FindObsConfigRoot(dir.path);
+  CHECK(normal.ok() && !normal->portable && normal->path.filename() != L"config");
+  WriteFile(dir.path / L"obs_portable_mode.txt", "");
+  auto portable = import::FindObsConfigRoot(dir.path);
+  CHECK(portable.ok() && portable->portable && portable->path == dir.path / L"config");
+}
+
+TEST(ConfigFindsProfileByName) {
+  TempDir dir(L"config");
+  WriteObsConfig(dir.path, {
+                               {"global.ini", "[General]\nLastVersion=537001986\n"},
+                               {"user.ini", "[Basic]\nProfile=Voice\nSceneCollection=Main\n"},
+                               // Folder names don't matter, the saved Name does.
+                               {"basic/profiles/Voice/basic.ini", "[General]\nName=Other\n"},
+                               {"basic/profiles/Folder/basic.ini",
+                                "[General]\nName=Voice\n[Audio]\nSampleRate=44100\nChannelSetup=5.1\n"
+                                "MonitoringDeviceId={x}\nMonitoringDeviceName=Cable\n"},
+                           });
+  auto config = import::FindActiveObsConfig({dir.path, false});
+  CHECK(config.ok());
+  if (!config) return;
+  CHECK(config->settings_file.filename() == L"user.ini");
+  CHECK(config->profile == "Voice" && config->profile_dir.filename() == L"Folder");
+  CHECK(config->audio.sample_rate == 44100 && config->audio.speakers == SPEAKERS_5POINT1);
+  CHECK(config->audio.monitoring_device_id == "{x}" && config->audio.monitoring_device_name == "Cable");
+  CHECK(config->collection == "Main");
+  CHECK(config->scenes_dir == dir.path / L"obs-studio" / L"basic" / L"scenes");
+}
+
+TEST(ConfigDefaultsAndLegacyGlobalIni) {
+  TempDir dir(L"legacy");
+  // No user.ini: OBS 30 and older kept [Basic] in global.ini. A profile
+  // without a Name goes by its folder, and missing [Audio] keys get OBS's
+  // defaults.
+  WriteObsConfig(dir.path, {
+                               {"global.ini", "[Basic]\nProfile=Untitled\nSceneCollection=Untitled\n"},
+                               {"basic/profiles/Untitled/basic.ini", "[Video]\nBaseCX=1920\n"},
+                           });
+  auto config = import::FindActiveObsConfig({dir.path, false});
+  CHECK(config.ok());
+  if (!config) return;
+  CHECK(config->settings_file.filename() == L"global.ini");
+  CHECK(config->audio.sample_rate == 48000 && config->audio.channel_setup == "Stereo");
+  CHECK(config->audio.speakers == SPEAKERS_STEREO && config->audio.monitoring_device_id == "default");
+}
+
+TEST(ConfigUsesExistingLocationsOnly) {
+  TempDir dir(L"locations");
+  TempDir elsewhere(L"locations-elsewhere");
+  // OBS writes paths with escaped backslashes.
+  std::string escaped;
+  for (const char c : ToUtf8(elsewhere.path)) escaped += c == '\\' ? std::string("\\\\") : std::string(1, c);
+  const std::string global = std::format(
+      "[Locations]\nConfiguration=C:\\\\knobs-missing\nProfiles={}\nSceneCollections={}\n", escaped, escaped);
+  WriteObsConfig(dir.path, {
+                               {"global.ini", global},
+                               {"user.ini", "[Basic]\nProfile=P\nSceneCollection=C\n"},
+                           });
+  WriteFile(elsewhere.path / L"obs-studio" / L"basic" / L"profiles" / L"P" / L"basic.ini", "[General]\nName=P\n");
+  auto config = import::FindActiveObsConfig({dir.path, false});
+  CHECK(config.ok());
+  if (!config) return;
+  CHECK(config->profile_dir == elsewhere.path / L"obs-studio" / L"basic" / L"profiles" / L"P");
+  CHECK(config->scenes_dir == elsewhere.path / L"obs-studio" / L"basic" / L"scenes");
+  // Portable mode ignores [Locations].
+  CHECK(!import::FindActiveObsConfig({dir.path, true}).ok());
+}
+
+TEST(ConfigReportsWhatsMissing) {
+  TempDir dir(L"missing");
+  auto none = import::FindActiveObsConfig({dir.path, false});
+  CHECK(!none.ok() && none.error().find("Start OBS once") != std::string::npos);
+  WriteObsConfig(dir.path, {{"global.ini", ""}, {"user.ini", "[Basic]\nProfile=Gone\nSceneCollection=C\n"}});
+  auto gone = import::FindActiveObsConfig({dir.path, false});
+  CHECK(!gone.ok() && gone.error().find("\"Gone\"") != std::string::npos);
+  WriteObsConfig(dir.path, {{"basic/profiles/Gone/basic.ini", "[Audio]\nSampleRate=fast\n"}});
+  auto bad_rate = import::FindActiveObsConfig({dir.path, false});
+  CHECK(!bad_rate.ok() && bad_rate.error().find("sample rate") != std::string::npos);
+}
+
+TEST(CollectionFoundBySavedName) {
+  TempDir dir(L"collections");
+  const fs::path scenes = dir.path / L"obs-studio" / L"basic" / L"scenes";
+  WriteFile(scenes / L"Main_Scenes.json", "named");
+  WriteFile(scenes / L"Main Scenes.json.bak", "a backup");
+  WriteFile(scenes / L"Untitled.json", "unnamed");
+  WriteFile(scenes / L"Upper.JSON", "wrong case");
+  import::ActiveObsConfig config;
+  config.scenes_dir = scenes;
+  const auto names = [](const fs::path& file) -> std::string {
+    if (file.filename() == L"Main_Scenes.json") return "Main Scenes";
+    if (file.filename() == L"Upper.JSON") return "Upper";
+    return "";
+  };
+  config.collection = "Main Scenes";
+  auto main = import::FindSceneCollectionFile(config, names);
+  CHECK(main.ok() && main->filename() == L"Main_Scenes.json");
+  config.collection = "Untitled";  // No saved name: the file name counts.
+  auto untitled = import::FindSceneCollectionFile(config, names);
+  CHECK(untitled.ok() && untitled->filename() == L"Untitled.json");
+  config.collection = "Upper";  // OBS only looks at ".json".
+  CHECK(!import::FindSceneCollectionFile(config, names).ok());
+}
+
+TEST(PickMicByNumberOrName) {
+  std::vector<import::MicCandidate> mics(3);
+  mics[0].name = "Mic/Aux";
+  mics[0].location = "AuxAudioDevice1";
+  mics[0].monitored = true;
+  mics[1].name = "Podcast Mic";
+  mics[1].location = "sources[2]";
+  mics[2].name = "podcast mic";
+  mics[2].location = "sources[5]";
+  CHECK(import::DescribeMic(mics[0], 1) == "1. \"Mic/Aux\" (AuxAudioDevice1, monitored)");
+  CHECK(import::PickMic(mics, "2").ok() && *import::PickMic(mics, "2") == 1);
+  CHECK(import::PickMic(mics, "MIC/AUX").ok() && *import::PickMic(mics, "MIC/AUX") == 0);
+  const auto ambiguous = import::PickMic(mics, "Podcast Mic");
+  CHECK(!ambiguous.ok() && ambiguous.error().find("Several") != std::string::npos);
+  CHECK(!import::PickMic(mics, "4").ok());
+  CHECK(!import::PickMic(mics, "0").ok());
+  const auto unpicked = import::PickMic(mics, "");
+  CHECK(!unpicked.ok() && unpicked.error().find("3. \"podcast mic\" (sources[5])") != std::string::npos);
+  CHECK(import::PickMic({mics[1]}, "").ok());
+  CHECK(!import::PickMic({}, "").ok());
 }
 
 // --- Devices -------------------------------------------------------------------

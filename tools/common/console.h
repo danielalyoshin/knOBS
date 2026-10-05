@@ -23,7 +23,8 @@ inline constexpr int kExitSkip = 77;
 // Writes UTF-8 to stdout and flushes.
 void Print(std::string_view text);
 
-enum class Outcome { kOk, kFail, kNote };
+// kWarn is for something the user should know that doesn't fail the run.
+enum class Outcome { kOk, kFail, kWarn, kNote };
 
 // Prints one result line. kFail also marks the run as failed.
 void Report(Outcome outcome, std::string_view step, std::string_view detail);

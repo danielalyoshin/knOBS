@@ -33,7 +33,8 @@ ctest --preset release           # tests that need OBS skip if it isn't installe
 The build puts these in `build\x64\<config>\`. Each one takes `--help`.
 
 - `knobs-smoke` checks that libobs loads from the private copy and shuts down cleanly.
-- `knobs-harness` pushes a WAV through a filter chain offline and checks that the output is bit-identical across runs. It opens no audio devices.
+- `knobs-import` imports the mic from your active OBS profile and scene collection, without changing them, and shows what it found: the mics, warnings about anything knOBS can't reproduce, and the filter chain. It opens no audio devices.
+- `knobs-harness` pushes a WAV through a filter chain, such as your imported one (`--import`), offline and checks that the output is bit-identical across runs. It opens no audio devices.
 - `knobs-live` runs the live path into a virtual cable and measures its latency. Only `--run` and `--measure-mic` open the microphone.
 
 ## License
