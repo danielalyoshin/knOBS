@@ -89,29 +89,16 @@ std::variant<StartedTool, int> StartTool(const ToolStartOptions& options) {
 
 Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::ActiveObsConfig& config,
                                       const ImportArgs& args) {
-  // Each collection file is parsed once. The search stops at the match, so
-  // the last one parsed is the one it returns, unless that matched by its
-  // file name without parsing.
-  std::unique_ptr<import::SceneCollection> collection;
-  fs::path parsed;
-  auto file = import::FindSceneCollectionFile(config, [&](const fs::path& path) -> std::string {
-    auto read = import::SceneCollection::Read(api, path);
-    parsed = path;
-    collection = read ? std::move(*read) : nullptr;
-    return collection ? collection->name() : "";
-  });
-  if (!file) return Error{file.error()};
-  if (!collection || parsed != *file) {
-    auto read = import::SceneCollection::Read(api, *file);
-    if (!read) return Error{read.error()};
-    collection = std::move(*read);
-  }
-  Check(true, "collection", std::format("\"{}\": {}", config.collection, ToUtf8(collection->file())));
-  if (collection->from_backup()) {
-    Report(Outcome::kWarn, "collection", std::format("{} doesn't parse, so this is its backup", ToUtf8(*file)));
+  auto collection = import::ReadActiveCollection(api, config);
+  if (!collection) return Error{collection.error()};
+  Check(true, "collection", std::format("\"{}\": {}", config.collection, ToUtf8((*collection)->file())));
+  if ((*collection)->from_backup()) {
+    Report(Outcome::kWarn, "collection",
+           std::format("{} doesn't parse, so this is its backup",
+                       ToUtf8(fs::path((*collection)->file()).replace_extension())));
   }
 
-  const auto mics = collection->Mics();
+  const auto mics = (*collection)->Mics();
   if (mics.size() > 1) {
     for (size_t i = 0; i < mics.size(); ++i) Report(Outcome::kNote, "mics", import::DescribeMic(mics[i], i + 1));
   }
@@ -123,7 +110,7 @@ Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::
   const import::MicCandidate& mic = mics[*picked];
   Check(true, "mic", std::format("{}, device {}", import::DescribeMic(mic, *picked + 1), mic.device_id));
 
-  auto imported = collection->Import(mic);
+  auto imported = (*collection)->Import(mic);
   if (!imported) return Error{imported.error()};
   for (const import::ImportNote& note : imported->notes) {
     Report(note.warning ? Outcome::kWarn : Outcome::kNote, "pre-flight", note.text);

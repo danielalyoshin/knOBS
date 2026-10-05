@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
 // Unit tests for the parts of the runtime layer that don't need OBS
-// installed. A deliberately tiny harness: TEST registers, CHECK records.
+// installed, and the test runner. The core's tests are in core_tests.cpp.
 
 #include <windows.h>
 
@@ -35,6 +35,7 @@
 #include "runtime/obs_version.h"
 #include "runtime/pe_imports.h"
 #include "runtime/runtime_copy.h"
+#include "test_harness.h"
 #include "util/json.h"
 #include "util/win_strings.h"
 
@@ -44,35 +45,6 @@ using namespace knobs;
 using namespace knobs::runtime;
 using namespace knobs::tools;
 namespace fs = std::filesystem;
-
-struct TestCase {
-  const char* name;
-  void (*run)();
-};
-
-std::vector<TestCase>& Tests() {
-  static std::vector<TestCase> tests;
-  return tests;
-}
-
-struct Registrar {
-  Registrar(const char* name, void (*run)()) { Tests().push_back({name, run}); }
-};
-
-int g_failures = 0;
-
-#define TEST(name)                                     \
-  void name();                                         \
-  const Registrar name##_registrar(#name, &name);      \
-  void name()
-
-#define CHECK(condition)                                                              \
-  do {                                                                                \
-    if (!(condition)) {                                                               \
-      std::fprintf(stderr, "%s(%d): CHECK failed: %s\n", __FILE__, __LINE__, #condition); \
-      ++g_failures;                                                                   \
-    }                                                                                 \
-  } while (false)
 
 fs::path SelfPath() {
   wchar_t path[MAX_PATH * 2];
@@ -919,7 +891,9 @@ TEST(EnvelopeIgnoresFramesOffTheGrid) {
 }  // namespace
 
 int main() {
-  for (const TestCase& test : Tests()) {
+  using knobs::test::g_failures;
+  using knobs::test::Tests;
+  for (const knobs::test::TestCase& test : Tests()) {
     const int before = g_failures;
     test.run();
     std::printf("[%s] %s\n", g_failures == before ? "ok" : "FAIL", test.name);

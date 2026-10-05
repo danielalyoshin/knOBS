@@ -24,7 +24,13 @@ target_include_directories(libobs_headers SYSTEM INTERFACE third_party/libobs)
 
 add_library(knobs_runtime STATIC
   src/audio/audio_devices.cpp
+  src/audio/device_watch.cpp
   src/audio/live_chain.cpp
+  src/core/controller.cpp
+  src/core/core.cpp
+  src/core/obs_backend.cpp
+  src/core/obs_process.cpp
+  src/core/state.cpp
   src/import/mic_import.cpp
   src/import/obs_config.cpp
   src/import/obs_ini.cpp
@@ -79,7 +85,10 @@ target_link_libraries(knobs-import PRIVATE knobs_tools)
 add_executable(knobs-compare tools/compare/compare_main.cpp)
 target_link_libraries(knobs-compare PRIVATE knobs_tools)
 
-add_executable(knobs-tests tests/unit_tests.cpp)
+add_executable(knobs-core tools/core/core_main.cpp)
+target_link_libraries(knobs-core PRIVATE knobs_tools ole32 psapi)
+
+add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp)
 target_link_libraries(knobs-tests PRIVATE knobs_tools delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
@@ -87,8 +96,8 @@ target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 enable_testing()
 add_test(NAME unit COMMAND knobs-tests)
 # The tests below need OBS installed and skip when it isn't. None of them
-# opens the mic or any other audio device, and the import test reads a
-# made-up OBS settings folder, not the user's.
+# opens the mic or any other audio device, and the import and core tests
+# read a made-up OBS settings folder, not the user's.
 add_test(NAME smoke COMMAND knobs-smoke)
 add_test(NAME harness COMMAND knobs-harness --runs 3)
 set_tests_properties(smoke harness PROPERTIES SKIP_RETURN_CODE 77)
@@ -97,3 +106,8 @@ add_test(NAME import
           -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_fixture.cmake)
 set_tests_properties(import PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
+add_test(NAME core
+  COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-core>
+          -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
+          -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/core_fixture.cmake)
+set_tests_properties(core PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")

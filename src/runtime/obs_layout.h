@@ -17,6 +17,9 @@ inline constexpr std::array<std::string_view, 2> kObsModules = {"win-wasapi", "o
 // Graphics module for the dummy-video fallback (see VideoMode::kDummy).
 inline constexpr std::string_view kGraphicsModule = "libobs-d3d11";
 
+// OBS's program, in bin\64bit.
+inline constexpr std::wstring_view kObsExe = L"obs64.exe";
+
 inline std::filesystem::path BinDir(const std::filesystem::path& root) {
   return root / L"bin" / L"64bit";
 }

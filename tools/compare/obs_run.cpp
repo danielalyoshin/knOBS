@@ -360,7 +360,7 @@ Result<ObsRecordingResult> RecordWithObs(const runtime::ObsApi& api, const ObsRe
   if (!written) return Error{written.error()};
 
   const fs::path bin = runtime::BinDir(run.copy);
-  const fs::path exe = bin / L"obs64.exe";
+  const fs::path exe = bin / runtime::kObsExe;
   std::wstring command = std::format(
       L"\"{}\" --portable --multi --disable-updater --disable-missing-files-check --minimize-to-tray "
       L"--startrecording",

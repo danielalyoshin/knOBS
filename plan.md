@@ -81,7 +81,7 @@ When the installed OBS version changes, knobs notices on startup and prompts a r
 1. `obs_startup("en-US", module_config_path, nullptr)` — `module_config_path` is knobs's own `%AppData%\knobs\module-config`, never OBS's. knobs treats `%AppData%\obs-studio` as read-only. `obs_startup()` initializes COM as a single-threaded apartment on its calling thread, and `obs_shutdown()` uninitializes it, so both must run on the same thread, and not one already in a multithreaded apartment.
 2. `base_set_log_handler()` → knobs log file in `%LocalAppData%\knobs\logs` (backs "open logs" in the tray). Set before `obs_startup` so startup is logged.
 3. `obs_reset_audio()` — sample rate + channels from the active profile's `basic.ini`. Monitoring bypasses the audio thread, so the buffering settings don't affect what reaches the cable (M1 findings).
-4. Video: **no** `obs_reset_video()` through M2. Audio flows without it. Device-loss recovery is the open question; see M0 findings.
+4. Video: **no** `obs_reset_video()`. Audio flows without it. Without the video tick, a mic never restarts by itself after losing its device, so knobs rebuilds it (M3 findings).
 5. Open + init only `win-wasapi` and `obs-filters` (`obs_open_module(bin, data)` with absolute paths into the runtime copy, then `obs_init_module`), then `obs_post_load_modules()`. No `obs_add_module_path()`: that only feeds `obs_load_all_modules()`, which knobs doesn't use. As a side effect, OBS's safe-mode and disabled-module lists don't apply.
 6. `obs_load_private_source(source_data)` with the mic's saved source object from the scene collection. It's the private form of `obs_load_source()`: the same loader, but the source stays out of the global source list and registers no hotkeys. OBS's own loader recreates the `wasapi_input_capture` source, its filters in order, and source-level state (volume, balance, mute, Mono flag, sync offset). knobs forces the saved monitoring off during the load so no device opens early (`LoadSourceJson` in `src/audio/live_chain.h`), under both the 32.2 key and the one 33.0 reads (OBS 33.0 notes). OBS itself loads a mic two ways. `obs_load_sources` loads each of a collection's `sources` and then calls `obs_source_load2` on it, which runs the `load` callbacks of the source and its filters. The frontend loads global audio devices (Mic/Aux) with `obs_load_source` alone (`LoadAudioDevice`). Import matches whichever applies to the chosen mic (`LoadOptions::load_callbacks`). None of the types in the two modules has a `load` callback in 32.2.2, so this is about staying aligned, not about today's audio.
 7. Post-load fixups: `obs_source_set_monitoring_type(src, OBS_MONITORING_TYPE_MONITOR_ONLY)`, then `obs_source_inc_active(src)`, because the monitor only plays while the source is active. Mute, push-to-talk and push-to-mute need no fixup: the monitor ignores them, in OBS as in knobs (M1 findings). 33.0 deprecates `obs_source_set_monitoring_type` (OBS 33.0 notes).
@@ -108,7 +108,7 @@ Measured with `knobs-smoke` (`tools/smoke`), which runs the whole bootstrap and 
   - (a) Use the dummy canvas so win-wasapi's own reconnect runs. It costs about 70 MB of private memory, about 70 threads, and a live D3D11 device on adapter 0, which can wake a discrete GPU on hybrid laptops.
   - (b) Stay video-less and recreate the source with `obs_load_source()` when the device comes back.
 
-  Recommendation: (b). It re-runs OBS's own loader, so fidelity is unaffected, and it keeps the G3 footprint.
+  Recommendation: (b). It re-runs OBS's own loader, so fidelity is unaffected, and it keeps the G3 footprint. Decided in M3: (b) (M3 findings).
 
 ### M1 findings (OBS 32.2.2)
 
@@ -214,15 +214,62 @@ Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The bran
   - The status line can't be clicked. When something needs the user, the next item is the fix, in bold: "Finish setup…", "Choose a cable…", "Find OBS…".
   - Cable ▸ starts with "Same as OBS (…)" when the profile monitors to a cable. Any other pick is knobs's own setting and survives re-imports. Detected cables come first, and other playback devices go under "Other devices".
   - Dark menus come from uxtheme's `SetPreferredAppMode`, resolved by ordinal. Without it, the menu stays light.
-- **Following OBS:** knobs re-imports when it starts and each time `obs64.exe` exits, and says so only when the mic or the chain changed. An OBS update to a supported version refreshes the runtime copy and restarts knobs. An unsupported one stops knobs, with a notification.
+- **Following OBS:** knobs re-imports when it starts and each time `obs64.exe` exits, and says so only when the mic or the chain changed (`Snapshot::chain_revision`). An OBS update to a supported version refreshes the runtime copy and restarts knobs. An unsupported one stops knobs, with a notification.
 - **Tray icon:** a glyph of its own, not `knobs.ico`: the knob without its tile, filling the square, fitted to the pixel grid at 16, 20, 24 and 32 px, with a light rim on a dark taskbar. Running shows the knob alone, paused adds a pause badge, and needing the user adds an amber "!" badge. The knob itself is never recolored. The tooltip repeats the status line.
 - **Notifications** are `Shell_NotifyIcon` balloons: what happened, then what knobs does or what to do. Clicking one opens the fix. They cover a mic missing for 5 s (so a power cycle stays quiet), a missing cable, a chain changed in OBS, a filter knobs can't run, and an unsupported OBS. Nothing shows on a cold boot, or when OBS opens or closes without changes.
 - **Open:**
   - Pausing while OBS is open leaves the cable silent if OBS doesn't monitor the mic, which is likely once knobs does that job. Pausing only when OBS's saved settings monitor the mic to the same cable avoids that, but saved settings can lag behind what OBS is doing.
   - Cable recording sides: CABLE Input and CABLE In 16ch go to CABLE Output, CABLE-A Input to CABLE-A Output, VoiceMeeter Input to VoiceMeeter Output. For anything else, say "the recording side of …".
-  - A re-import that changes the sample rate or channel layout may need `obs_reset_audio` or a restart.
+  - ~~A re-import that changes the sample rate or channel layout may need `obs_reset_audio` or a restart.~~ It needs a restart, as in OBS (M3 findings).
   - Check the OBS names in the second door's steps against 32.2.2's locale files.
   - Open OBS has to start `obs64.exe` with its own `bin\64bit` as the working directory.
+
+### The always-on core (M3)
+
+Built on 2026-10-05 in `src/core/`, with no UI yet. The tray shows its state and sends it commands. `knobs-core` runs it with no tray and prints each change of state.
+
+- **States** (`core::State`): starting, running, paused (by the user, or while OBS is open), needs setup, mic missing, cable missing, OBS missing, OBS unsupported, restart needed and failed. Needs setup says what's missing: OBS's settings can't be read, the collection has no mic, it has several and none is picked, or the profile monitors to the default device and no cable is picked. Each state comes with the chain in the status format (Tray and first run), the collection's mics, the pre-flight notes, and a chain revision that goes up when an import finds the mic or its chain changed.
+- **Order.** After every event the controller works out the state from what it knows, and the first match wins:
+  1. a problem with OBS, its settings or the import;
+  2. a chain that failed to start;
+  3. paused by the user;
+  4. paused while OBS is open;
+  5. the cable missing;
+  6. the mic missing.
+
+  So a missing mic doesn't show while paused, and needing setup shows even while OBS is open. The cable comes before the mic because a missing cable needs the user, while a mic usually comes back by itself.
+- **The chain runs only while running.** Every other state releases it, which frees the mic and the cable and costs no CPU. The next time the state is running, libobs's loader builds the chain again (`obs_load_private_source`, §4 step 6). Pausing while OBS is open works the same way, so the cable never gets a stream from both.
+- **Following OBS.** knobs pauses while OBS runs (M3 findings explain how it's seen). When OBS exits, knobs imports again: the install, the profile and the collection. A new OBS version needs a restart, and an unsupported one stops knobs. A re-import while the chain runs, such as Re-import from OBS in the tray, reloads it only if the mic, the chain or the cable changed (`ChainPlan::SameAs`). Chains are compared by `ImportedMic::chain_key`, which leaves out what doesn't reach the cable. A new sample rate or channel layout needs a restart, as in OBS.
+- **Devices.** An `IMMNotificationClient` (`audio::DeviceWatch`) hears devices come and go and default devices change. Notifications come in bursts, so the devices are listed again once they've been quiet for 500 ms, or 2 s after the first. A mic or cable that goes away releases the chain (mic missing, cable missing), and the chain is rebuilt when it's back. A mic set to "default" is also rebuilt when the default communications device changes.
+- **Watchdog.** Every second while the chain runs, the core checks that the chain's audio capture callback has seen packets. A mic sends them even when silent. After 3 s without, the chain has stalled: the state is mic missing, and the chain is rebuilt after 2 s, then after 5, 15, 30 and 60 s if it keeps stalling. 30 s of audio starts the waits over, and a device notification tries again at once. This covers what notifications don't, such as a device whose format changed in Windows.
+- **One thread.** `core::Core` runs the controller on a thread of its own. That thread also runs libobs from start to shutdown (§4 step 1) and pumps messages, as a COM single-threaded apartment must. It checks for OBS every second. Device notifications and the tray's commands (pause, resume, re-import, new settings) are posted to it, and the observer (`core::Observer`) hears each change of state on it.
+- **Settings** (`core::Settings`): the OBS install, OBS's settings folder, the mic and the cable. They override what knobs imports and survive re-imports. Saving them in `%AppData%\knobs` is the tray's job.
+- **Testable without OBS.** The controller has no threads or clock of its own and drives a `Backend` interface. The unit tests run it, and the core's thread, on a fake. `ObsBackend` is the real one, on `ObsHost` and `LiveChain`. `knobs-core` runs dry by default: the chain loads through libobs's loader as a push source with no device and isn't monitored, so no audio device opens.
+- **Not yet:** knobs's log opens when libobs starts, so what happens before that (OBS missing, settings that can't be read) reaches the observer but not the log.
+
+### M3 findings (OBS 32.2.2)
+
+Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with `knobs-core` on 2026-10-05 while the PC ran other programs. No audio device was opened. The core ran dry, and the portable OBS used to test the process watch (knobs-compare's copy) has no audio capture or monitoring; its log confirms that.
+
+- **Without video, a mic source never restarts.** When the device fails, win-wasapi's capture paths (`CaptureThread`, or `OnStartCapture` and `OnSampleReady` with RTWQ) signal its reconnect thread, and only `activate` creates that thread (M0 findings). So nothing restarts the source when:
+  - its device is missing when it loads;
+  - its device goes away while it captures (`AUDCLNT_E_DEVICE_INVALIDATED`);
+  - it's set to "default" and the default communications device changes. `SetDefaultDevice` asks for a restart through the same signal.
+- **Silence still arrives.** win-wasapi passes buffers flagged `AUDCLNT_BUFFERFLAGS_SILENT` on as zeros, so a working mic always delivers packets. The watchdog relies on that.
+- **The monitor and a missing cable.** If the cable goes away, libobs's monitor frees its stream and tries to open it again on every packet, 100 times a second, until the cable is back (`on_audio_playback`). If the cable is missing when monitoring starts, there's no monitor at all, and it never comes back (`audio_monitor_create`). So knobs starts the chain only when the cable is there, and releases it when the cable goes.
+- **Decision: (b), rebuild the source.** The core releases the chain when the mic or the cable goes, and loads it again with `obs_load_private_source` once both are back. The watchdog catches what notifications miss. It re-runs OBS's own loader, so fidelity is unaffected, and it needs no video, so the footprint stays as measured in M0, without the dummy canvas's D3D11 device, 70 MB of private memory and 70 threads. Filters start fresh after a rebuild, as they do when OBS starts.
+- **A new sample rate or channel layout needs a restart, in OBS too.** OBS asks for a restart when either changes in Settings (`AudioChangedRestart`) and when switching to a profile that differs in them (`GetRestartRequirements`). OBS never calls `obs_reset_audio` on a running libobs, so knobs restarts too.
+- **What reaches the cable.** A disabled source counts as muted (`source_muted` in obs-source.c), and the monitor ignores mute (M1 findings). OBS saves nothing time-dependent in a source (`obs_save_source`), so an unchanged mic saves the same JSON. The chain key leaves out mute, push-to-talk and push-to-mute, `enabled`, `sync`, monitoring, hotkeys, mixers, deinterlacing, UUIDs and private settings, so muting the mic in OBS isn't a change.
+- **Finding OBS.** OBS creates a named mutex first thing, before its window or any module, and holds it until it has saved its settings (`CheckIfAlreadyRunning` in obs-main.cpp). It's `OBSStudioCore`, or for a portable OBS, `OBSStudioPortable` followed by its settings folder with every character that isn't a letter or digit replaced. `--multi` doesn't skip it. Costs, measured:
+
+  | Check | Cost |
+  |---|---|
+  | Opening the mutex by name | 0.3 µs |
+  | `NtQuerySystemInformation` process list | 1.2 ms |
+  | `CreateToolhelp32Snapshot` | 1.9 ms, 3.4 ms read in full |
+
+  Scanning the processes every second cost `knobs-core` 0.2–0.4% of a core. `ObsWatch` checks the mutex every second, and scans the process list every 2 s and when the mutex appears. It watches the OBS processes it finds through their handles. Its work for one minute takes 0.07% of a core. The lean portable copy loads its audio sources 1.6 s after starting, so an installed OBS is seen before it can monitor anything. A portable OBS is seen within 2 s: its mutex name depends on its working directory, so knobs doesn't try to rebuild the name. Measured on the portable copy: seen 1.0 s after it started, and its exit 0.7 s after it ended.
+- **Cost of the core**, Release, dry, 60 s runs: 0.10–0.18% of a core without watching for OBS, 17–18 MB working set. Runs with the watch varied more than the watch costs (0.26–0.39%) while other programs ran, so the watch was measured on its own (above). libobs starts and imports in about 30 ms once the runtime copy exists.
 
 ## 5. Milestones
 
@@ -250,12 +297,13 @@ Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The bran
 - [ ] Support OBS 33.0 once it's released (OBS 33.0 notes in §4). Needed here because the comparison runs against the installed OBS, and knobs refuses 33.x until then. Still in beta on 2026-10-05 (33.0.0-beta6). The load fix is in.
 
 **M3 — Tray app**
+- [x] Always-on core, with no UI: the states the tray shows, following OBS and the audio devices, and rebuilding the chain (The always-on core in §4). `knobs-core` runs it with no tray. Done 2026-10-05.
 - [ ] Win32 tray: start/stop, device + cable pickers, re-import, autostart toggle, log access (Tray and first run in §4)
-- [ ] OBS folder picker when auto-detection fails; remember the choice in `%AppData%\knobs`
-- [ ] OBS coexistence: watch for `obs64.exe`; auto-pause while it runs, resume when it exits (toggleable), and re-import when it exits. Decide whether to pause when OBS doesn't monitor the mic (Tray and first run in §4).
-- [ ] Detect installed-OBS version change on startup → prompt re-import / runtime refresh (restart the process to load the new copy; prune old copies)
-- [ ] Device disconnect/reconnect. win-wasapi's reconnect thread only runs after `activate`, which needs the video tick (M0 findings). Choose between the dummy canvas and re-creating the source via `obs_load_source()`; either way, knobs surfaces state rather than reimplementing capture.
-- [ ] Error surfacing via tray notifications
+- [ ] OBS folder picker when auto-detection fails; remember the choice in `%AppData%\knobs`. The core takes the folder as `Settings::obs_dir`.
+- [ ] OBS coexistence: watch for `obs64.exe`; auto-pause while it runs, resume when it exits (toggleable), and re-import when it exits. Decide whether to pause when OBS doesn't monitor the mic (Tray and first run in §4). The core watches for OBS, pauses, resumes and re-imports (M3 findings). The toggle and the decision remain.
+- [ ] Detect installed-OBS version change on startup → prompt re-import / runtime refresh (restart the process to load the new copy; prune old copies). The core says a restart is needed when a re-import finds a new version, and stops on an unsupported one. The restart itself, the check at startup and the pruning remain.
+- [x] Device disconnect/reconnect. win-wasapi's reconnect thread only runs after `activate`, which needs the video tick (M0 findings). Choose between the dummy canvas and re-creating the source via `obs_load_source()`; either way, knobs surfaces state rather than reimplementing capture. Decided: re-create the source (M3 findings). Built in the core.
+- [ ] Error surfacing via tray notifications. The core reports each state with what happened; the notifications remain.
 - [ ] First run: one door for a mic already set up in OBS, one for people new to OBS (Tray and first run in §4). The M4 setup guide covers it too.
 - [ ] Exe icon from `assets/knobs.ico`. The tray gets a glyph of its own, with badges for paused and needing the user (Tray and first run in §4). It still needs drawing.
 - [ ] Long-run latency: run the mic into the cable for hours, alongside OBS for comparison, and watch for latency steps and clock drift (M1 findings). If latency creeps up, restarting the monitor resets it. Decide whether knobs should do that, for example while the mic is silent.
@@ -274,11 +322,11 @@ Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The bran
 | libobs ABI drift across OBS versions | `GetProcAddress` function table; tested version range; refuse to start outside it with a clear message. 33.0 deprecates the monitoring-type setter knobs uses and changes the saved monitoring key (OBS 33.0 notes). |
 | OBS not installed / non-standard install (Steam, portable) | Registry → default path → manual picker. OBS installed is a stated requirement. |
 | Loaded DLLs block OBS updates | Always load from the shadow copy in `%LocalAppData%\knobs\runtime\`, never from the install dir. |
-| Audio-only init has undocumented video dependencies | Confirmed in M0: activation and `video_tick` need the graphics thread. Audio is unaffected; device reconnect is decided in M3 (dummy canvas vs. source re-creation), with costs measured. |
+| Audio-only init has undocumented video dependencies | Confirmed in M0: activation and `video_tick` need the graphics thread. Audio is unaffected. Decided in M3: the core rebuilds the source when a device comes back, with a watchdog for stalls (M3 findings). |
 | `data/` path resolution (`find_libobs_data_file`) | Resolved in M0: the copy mirrors the install, the working directory is the copy's `bin\64bit`, and module paths are passed explicitly. The smoke test verifies both. |
 | Monitoring path latency differs from OBS | Same code path as OBS monitoring. Mic to cable on the same cable input: knobs 88.1 ms, OBS 87.7 ms (M1 findings). |
 | Latency creeps up over long sessions | libobs's monitor doesn't correct its delay for audio-only sources, so a hiccup raises latency until the stream restarts. OBS has the same behavior. One 10.6 ms step seen in M1. Measured over hours in M3. |
-| Doubled audio when OBS and knobs both monitor to VB-Cable | Auto-pause while `obs64.exe` runs. |
+| Doubled audio when OBS and knobs both monitor to VB-Cable | Auto-pause while `obs64.exe` runs. OBS is seen through its instance mutex within a second of starting, before it can load its audio, and a portable OBS within 2 s (M3 findings). |
 | Push-to-talk/mute on the imported source | Doesn't silence the cable: libobs's monitor ignores mute, in OBS too, from 32.2.0 on (M1 findings). The import summary notes it. PTT support is a v2 idea. |
 | OBS updates change scene JSON schema / filter IDs | `obs_load_source()` from the user's own OBS version; pre-flight validates and warns on unknown IDs. |
 | Chain includes a VST filter | Not supported in v1: stripped with a loud warning. v2 feature. |
@@ -308,6 +356,14 @@ Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The bran
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 9 (2026-10-05)
+
+- M3 started with the always-on core in `src/core`, with no UI yet. It has the states the tray shows, pauses while OBS is open and imports again when OBS exits, hears devices come and go, and rebuilds the chain with libobs's loader when the mic or the cable is back. `knobs-core` runs it. See The always-on core (§4).
+- Device loss decided: (b), rebuilding the source, with a watchdog for stalls. Without video, win-wasapi never restarts a mic that lost its device, or a "default" mic after the default device changes (M3 findings).
+- Pausing releases the chain, so resuming always loads it fresh. Reloading only on a change applies to a re-import while the chain runs.
+- A profile's new sample rate or channel layout needs a restart, as in OBS. Closed that open question.
+- OBS is seen through its instance mutex, with a process scan as a backstop: 0.07% of a core, against 0.2–0.4% for scanning every second.
 
 ### Revision notes — Rev 8 (2026-10-05)
 

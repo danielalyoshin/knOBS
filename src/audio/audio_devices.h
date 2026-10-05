@@ -15,6 +15,8 @@ namespace knobs::audio {
 struct AudioDevice {
   std::string name;
   std::string id;
+
+  friend bool operator==(const AudioDevice&, const AudioDevice&) = default;
 };
 
 // Recording devices from win-wasapi's own list, as OBS offers them for a mic

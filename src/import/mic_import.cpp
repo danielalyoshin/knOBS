@@ -26,6 +26,15 @@ constexpr std::array<const char*, 6> kGlobalDeviceKeys = {"DesktopAudioDevice1",
 constexpr std::string_view kVstFilterId = "vst_filter";
 constexpr std::string_view kNvidiaFilterId = "nvidia_audiofx_filter";
 constexpr std::string_view kCompressorId = "compressor_filter";
+// What ImportedMic::chain_key leaves out of a saved source (obs.c,
+// obs_save_source).
+constexpr std::array<const char*, 16> kKeysTheCableIgnores = {
+    // The monitor ignores these (M1 findings), in OBS too.
+    "muted", "push-to-mute", "push-to-mute-delay", "push-to-talk", "push-to-talk-delay", "enabled", "sync",
+    // knobs sets these itself.
+    "monitoring_type", "monitoring_enabled", "hotkeys",
+    // The output mix, video, and OBS's own bookkeeping.
+    "mixers", "deinterlace_mode", "deinterlace_field_order", "uuid", "canvas_uuid", "private_settings"};
 
 struct DataReleaser {
   const runtime::ObsApi* api;
@@ -277,7 +286,9 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic) const {
     const size_t count = api_.obs_data_array_count(filters.get());
     for (size_t i = 0; i < count; ++i) {
       DataPtr filter = Own(api_, api_.obs_data_array_item(filters.get(), i));
-      if (CheckFilter(api_, filter.get(), imported.notes)) api_.obs_data_array_push_back(kept.get(), filter.get());
+      if (!CheckFilter(api_, filter.get(), imported.notes)) continue;
+      api_.obs_data_array_push_back(kept.get(), filter.get());
+      if (Bool(api_, filter.get(), "enabled", true)) imported.filters.push_back(String(api_, filter.get(), "name"));
     }
     if (api_.obs_data_array_count(kept.get()) != count) api_.obs_data_set_array(source.get(), "filters", kept.get());
   }
@@ -285,7 +296,28 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic) const {
   const char* json = api_.obs_data_get_json(source.get());
   if (!json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
   imported.source_json = json;
+  for (const char* key : kKeysTheCableIgnores) api_.obs_data_erase(source.get(), key);
+  const char* key_json = api_.obs_data_get_json(source.get());
+  if (!key_json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
+  imported.chain_key = key_json;
   return imported;
+}
+
+Result<std::unique_ptr<SceneCollection>> ReadActiveCollection(const runtime::ObsApi& api,
+                                                              const ActiveObsConfig& config) {
+  // The search stops at the match, so the last file parsed is the one it
+  // returns, unless that matched by its file name without parsing.
+  std::unique_ptr<SceneCollection> collection;
+  fs::path parsed;
+  auto file = FindSceneCollectionFile(config, [&](const fs::path& path) -> std::string {
+    auto read = SceneCollection::Read(api, path);
+    parsed = path;
+    collection = read ? std::move(*read) : nullptr;
+    return collection ? collection->name() : "";
+  });
+  if (!file) return Error{file.error()};
+  if (collection && parsed == *file) return collection;
+  return SceneCollection::Read(api, *file);
 }
 
 }  // namespace knobs::import

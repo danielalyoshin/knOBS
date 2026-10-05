@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "import/obs_config.h"
 #include "runtime/obs_api.h"
 #include "util/result.h"
 
@@ -40,6 +41,8 @@ struct MicCandidate {
   std::string device_id;
   // Whether OBS monitors it.
   bool monitored = false;
+
+  friend bool operator==(const MicCandidate&, const MicCandidate&) = default;
 };
 
 // Picks the mic that `query` names: its number in `mics`, counting from 1,
@@ -55,6 +58,8 @@ struct ImportNote {
   // information only.
   bool warning = false;
   std::string text;
+
+  friend bool operator==(const ImportNote&, const ImportNote&) = default;
 };
 
 struct ImportedMic {
@@ -63,6 +68,16 @@ struct ImportedMic {
   // filters pre-flight removed. Serialized by libobs, the way OBS saves it.
   std::string source_json;
   std::vector<ImportNote> notes;
+  // The filters that are on, by name, in processing order: the chain as OBS
+  // shows it.
+  std::vector<std::string> filters;
+  // source_json without the keys that don't change what reaches the cable:
+  // libobs's monitor ignores mute, push-to-talk and push-to-mute, the
+  // source's enabled flag and its sync offset (plan.md, M1 findings), knobs
+  // sets monitoring itself, its private source registers no hotkeys, and the
+  // rest is the output mix, video or OBS's own bookkeeping. Imports with the
+  // same key load the same chain.
+  std::string chain_key;
 
   // Whether loading should run obs_source_load2 afterwards, as OBS does.
   bool load_callbacks() const { return mic.origin == MicOrigin::kSource; }
@@ -104,5 +119,10 @@ class SceneCollection {
   std::filesystem::path file_;
   bool from_backup_ = false;
 };
+
+// Reads the active scene collection: the file FindSceneCollectionFile picks,
+// or its backup. Each file is parsed once along the way.
+Result<std::unique_ptr<SceneCollection>> ReadActiveCollection(const runtime::ObsApi& api,
+                                                              const ActiveObsConfig& config);
 
 }  // namespace knobs::import
