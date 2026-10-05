@@ -31,6 +31,11 @@ struct Settings {
   // The playback device to send the mic to, by endpoint ID. Empty: the OBS
   // profile's monitoring device.
   std::string cable;
+  // Its name, for saying which device is missing while it isn't connected.
+  std::string cable_name;
+  // Pause while OBS runs (State::kPausedForObs). Off, the chain keeps running
+  // while OBS is open; OBS exiting still re-imports.
+  bool pause_for_obs = true;
 
   friend bool operator==(const Settings&, const Settings&) = default;
 };

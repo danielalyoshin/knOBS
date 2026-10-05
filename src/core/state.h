@@ -8,6 +8,7 @@
 #include <string_view>
 #include <vector>
 
+#include "audio/audio_devices.h"
 #include "import/mic_import.h"
 
 // What knobs is doing, as the tray shows it (plan.md, Tray and first run).
@@ -92,6 +93,13 @@ struct Snapshot {
   // first import, then 1.
   uint32_t chain_revision = 0;
   bool obs_running = false;
+  // Paused from the tray, even while a state above kPausedByUser shows.
+  bool paused_by_user = false;
+  // The OBS profile's monitoring device, once a profile has been read. Its
+  // ID may be "default".
+  audio::AudioDevice obs_cable;
+  // The playback devices that are connected, to pick a cable from.
+  std::vector<audio::AudioDevice> outputs;
 
   friend bool operator==(const Snapshot&, const Snapshot&) = default;
 };

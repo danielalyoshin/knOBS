@@ -152,6 +152,8 @@ void Controller::Refresh() {
   problem_.reset();
   import_.reset();
   plan_.reset();
+  profile_cable_id_.clear();
+  profile_cable_name_.clear();
   const auto fail = [this](State state, std::string detail, SetupNeed setup = SetupNeed::kNone) {
     problem_ = Problem{state, std::move(detail), setup};
   };
@@ -168,6 +170,8 @@ void Controller::Refresh() {
   auto config = backend_.ReadObsConfig(settings_, obs.install);
   if (!config) return fail(State::kNeedsSetup, config.error(), SetupNeed::kObsSettings);
   const import::ProfileAudio& audio = config->audio;
+  profile_cable_id_ = audio.monitoring_device_id;
+  profile_cable_name_ = audio.monitoring_device_name;
   if (!libobs_) {
     const Status started = backend_.StartLibobs(obs.install, audio);
     if (!started) return fail(State::kFailed, started.error());
@@ -195,8 +199,6 @@ void Controller::Refresh() {
     ++chain_revision_;
   }
 
-  profile_cable_id_ = audio.monitoring_device_id;
-  profile_cable_name_ = audio.monitoring_device_name;
   const std::string cable = settings_.cable.empty() ? audio.monitoring_device_id : settings_.cable;
   if (SameId(cable, kDefaultDevice)) {
     return fail(State::kNeedsSetup,
@@ -242,7 +244,10 @@ void Controller::Reconcile(Clock::time_point now) {
 Snapshot Controller::Decide(Clock::time_point now) const {
   Snapshot next;
   next.obs_running = obs_running_;
+  next.paused_by_user = paused_by_user_;
   next.chain_revision = chain_revision_;
+  next.obs_cable = {profile_cable_name_, profile_cable_id_};
+  next.outputs = devices_.outputs;
   if (import_) {
     next.mics = import_->mics;
     next.picked_mic = import_->picked;
@@ -262,7 +267,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
     set(State::kFailed, *chain_error_);
   } else if (paused_by_user_) {
     set(State::kPausedByUser);
-  } else if (obs_running_) {
+  } else if (obs_running_ && settings_.pause_for_obs) {
     set(State::kPausedForObs);
   } else if (!CablePresent()) {
     set(State::kCableMissing, std::format("\"{}\" isn't connected.", CableName()));
@@ -307,6 +312,7 @@ std::string Controller::CableName() const {
   const std::string& id = plan_->cable.id;
   if (const audio::AudioDevice* device = FindById(devices_.outputs, id)) return device->name;
   if (SameId(id, profile_cable_id_) && !profile_cable_name_.empty()) return profile_cable_name_;
+  if (SameId(id, settings_.cable) && !settings_.cable_name.empty()) return settings_.cable_name;
   return id;
 }
 

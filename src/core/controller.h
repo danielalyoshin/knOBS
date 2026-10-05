@@ -21,12 +21,12 @@ namespace knobs::core {
 //
 // After every event it works out the state from what it knows, in this
 // order: problems with OBS, its settings or the import; a chain that failed
-// to start; paused by the user; paused while OBS runs; the cable missing;
-// the mic missing. The chain runs only while the state is kRunning. Every
-// other state releases it, which frees the mic and the cable, and the next
-// kRunning loads it again with libobs's loader (plan.md, M3 findings). A
-// re-import while the chain runs reloads it only if the chain changed
-// (ChainPlan::SameAs).
+// to start; paused by the user; paused while OBS runs, unless
+// Settings::pause_for_obs is off; the cable missing; the mic missing. The
+// chain runs only while the state is kRunning. Every other state releases
+// it, which frees the mic and the cable, and the next kRunning loads it
+// again with libobs's loader (plan.md, M3 findings). A re-import while the
+// chain runs reloads it only if the chain changed (ChainPlan::SameAs).
 class Controller {
  public:
   using Clock = std::chrono::steady_clock;

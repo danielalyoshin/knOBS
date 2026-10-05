@@ -201,7 +201,7 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 
 ### Tray and first run (M3 design)
 
-Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The brand shows only in the knob icon and the line saying knobs isn't affiliated with the OBS Project.
+Shaped on 2026-10-05. The tray shell is built (Built: the tray shell, below); the first run, the tray glyph and the notifications aren't yet. The UI uses Windows' own controls. The brand shows only in the knob icon and the line saying knobs isn't affiliated with the OBS Project.
 
 - **One status format.** Status is the mic's chain, named as OBS shows it, enabled filters only: `Mic/Aux › 3-Band EQ › Expander › Compressor › Limiter › CABLE In 16ch`. The menu and tooltip use the short form `Mic/Aux › 4 filters › CABLE In 16ch`. The first run and notifications use the same format.
 - **First run:** one `TaskDialogIndirect` window that changes pages with `TDM_NAVIGATE_PAGE`. It stays light in dark mode, which is fine for a window seen once.
@@ -224,9 +224,21 @@ Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The bran
   - Check the OBS names in the second door's steps against 32.2.2's locale files.
   - Open OBS has to start `obs64.exe` with its own `bin\64bit` as the working directory.
 
+**Built: the tray shell** (2026-10-05, `src/tray`, `knobs.exe`). `knobs-tray` runs it on the real core over a made-up OBS and devices, for every state, and saves pictures of the menu.
+- **The status line** says the state and, once there's a chain, the chain in its short form: `Mic/Aux › 4 filters › CABLE In 16ch` while running, `Paused: …`, `Paused while OBS is open: …`, `Mic missing: …`, `Cable missing: …`, `No cable chosen: Mic/Aux › 4 filters`, `OBS has 3 mics`, `No mic in OBS yet`, `Can't read OBS's settings`, `Can't find OBS Studio`, `This version of OBS isn't supported`, `knobs needs to restart`, `Stopped after an error`, `Starting…`. Device names lose their driver's name, as Windows' Sound settings shows them: `CABLE In 16ch (VB-Audio Virtual Cable)` is `CABLE In 16ch`. The tooltip is "knobs" over the status line.
+- **The fixes**, in bold after the status line: Find OBS… (OBS missing; a folder picker, saved as the install), Finish setup… (OBS's settings unreadable, or no mic), Choose a mic… (several mics, none picked), Choose a cable… (the profile monitors to the default device, or the cable is missing), Restart knobs, and Try again (failed; a re-import). An unsupported OBS has no fix in the menu. Until the first run exists, Choose a mic… and Choose a cable… open those choices where the menu was, and Setup… and Finish setup… show what knobs found: the status, what happened and the import's notes.
+- **Mic ▸** starts with "Same as OBS (Mic/Aux)" when the collection has one mic. That's no pick, so knobs follows the mic if it's renamed or replaced in OBS. Then the collection's mics by name; a pick by name sticks. A pick the collection no longer has stays in the list, marked "not in OBS".
+- **Cable ▸** starts with "Same as OBS (…)" when the profile monitors to a cable, and also while it's the choice, so the check mark has somewhere to go. Cables are told apart by their names: VB-Audio's (VB-Cable, VoiceMeeter, Hi-Fi Cable) and Virtual Audio Cable. A pick that isn't connected stays in the list, marked "not connected", and so does OBS's device. "No virtual cable found" when there's none.
+- **Dark menus follow Windows' mode**, the taskbar's, not the app mode: the menu opens from the taskbar. Under high contrast, Windows draws the menu. Task dialogs stay light.
+- **Pause while OBS is open** is `core::Settings::pause_for_obs`. Off, the chain keeps running while OBS is open, and OBS exiting still re-imports.
+- **Settings** are in `%AppData%\knobs\settings.ini`, written whole through a temporary file: `[OBS]` `Install`, `Settings` and `PauseWhileOpen`, and `[Audio]` `Mic`, `Cable` (an endpoint ID) and `CableName`. Escaped as libobs's INI parser reads them, and read with that parser. Pause isn't saved, so a cold boot runs.
+- **Start with Windows** is a `knobs` value under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`: `"<exe>" --startup`. It counts as on only if it names this exe and Task Manager hasn't turned it off (`Explorer\StartupApproved\Run`, an odd first byte). Turning it on in knobs clears Task Manager's switch for it.
+- **One copy per session.** The running copy owns the mutex `Local\knobs.tray`. Starting another opens the running copy's menu, or does nothing when Windows started it at sign-in. Restart knobs starts a copy with `--restart`, which waits up to 30 s for the old one to shut libobs down.
+- **knobs.exe** is a Windows-subsystem exe with the static CRT and a manifest for per-monitor DPI awareness (v2) and Common Controls 6. It quits cleanly on `WM_CLOSE` and when Windows ends the session.
+
 ### The always-on core (M3)
 
-Built on 2026-10-05 in `src/core/`, with no UI yet. The tray shows its state and sends it commands. `knobs-core` runs it with no tray and prints each change of state.
+Built on 2026-10-05 in `src/core/`. The tray (Built: the tray shell) shows its state and sends it commands. `knobs-core` runs it with no tray and prints each change of state.
 
 - **States** (`core::State`): starting, running, paused (by the user, or while OBS is open), needs setup, mic missing, cable missing, OBS missing, OBS unsupported, restart needed and failed. Needs setup says what's missing: OBS's settings can't be read, the collection has no mic, it has several and none is picked, or the profile monitors to the default device and no cable is picked. Each state comes with the chain in the status format (Tray and first run), the collection's mics, the pre-flight notes, and a chain revision that goes up when an import finds the mic or its chain changed.
 - **Order.** After every event the controller works out the state from what it knows, and the first match wins:
@@ -243,7 +255,7 @@ Built on 2026-10-05 in `src/core/`, with no UI yet. The tray shows its state and
 - **Devices.** An `IMMNotificationClient` (`audio::DeviceWatch`) hears devices come and go and default devices change. Notifications come in bursts, so the devices are listed again once they've been quiet for 500 ms, or 2 s after the first. A mic or cable that goes away releases the chain (mic missing, cable missing), and the chain is rebuilt when it's back. A mic set to "default" is also rebuilt when the default communications device changes.
 - **Watchdog.** Every second while the chain runs, the core checks that the chain's audio capture callback has seen packets. A mic sends them even when silent. After 3 s without, the chain has stalled: the state is mic missing, and the chain is rebuilt after 2 s, then after 5, 15, 30 and 60 s if it keeps stalling. 30 s of audio starts the waits over, and a device notification tries again at once. This covers what notifications don't, such as a device whose format changed in Windows.
 - **One thread.** `core::Core` runs the controller on a thread of its own. That thread also runs libobs from start to shutdown (§4 step 1) and pumps messages, as a COM single-threaded apartment must. It checks for OBS every second. Device notifications and the tray's commands (pause, resume, re-import, new settings) are posted to it, and the observer (`core::Observer`) hears each change of state on it.
-- **Settings** (`core::Settings`): the OBS install, OBS's settings folder, the mic and the cable. They override what knobs imports and survive re-imports. Saving them in `%AppData%\knobs` is the tray's job.
+- **Settings** (`core::Settings`): the OBS install, OBS's settings folder, the mic, the cable and whether to pause while OBS is open. They override what knobs imports and survive re-imports. The tray saves them (Built: the tray shell). Snapshots also carry what the tray offers: the connected playback devices, the profile's monitoring device, and whether the user paused.
 - **Testable without OBS.** The controller has no threads or clock of its own and drives a `Backend` interface. The unit tests run it, and the core's thread, on a fake. `ObsBackend` is the real one, on `ObsHost` and `LiveChain`. `knobs-core` runs dry by default: the chain loads through libobs's loader as a push source with no device and isn't monitored, so no audio device opens.
 - **Not yet:** knobs's log opens when libobs starts, so what happens before that (OBS missing, settings that can't be read) reaches the observer but not the log.
 
@@ -298,14 +310,14 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 
 **M3 — Tray app**
 - [x] Always-on core, with no UI: the states the tray shows, following OBS and the audio devices, and rebuilding the chain (The always-on core in §4). `knobs-core` runs it with no tray. Done 2026-10-05.
-- [ ] Win32 tray: start/stop, device + cable pickers, re-import, autostart toggle, log access (Tray and first run in §4)
-- [ ] OBS folder picker when auto-detection fails; remember the choice in `%AppData%\knobs`. The core takes the folder as `Settings::obs_dir`.
-- [ ] OBS coexistence: watch for `obs64.exe`; auto-pause while it runs, resume when it exits (toggleable), and re-import when it exits. Decide whether to pause when OBS doesn't monitor the mic (Tray and first run in §4). The core watches for OBS, pauses, resumes and re-imports (M3 findings). The toggle and the decision remain.
-- [ ] Detect installed-OBS version change on startup → prompt re-import / runtime refresh (restart the process to load the new copy; prune old copies). The core says a restart is needed when a re-import finds a new version, and stops on an unsupported one. The restart itself, the check at startup and the pruning remain.
+- [x] Win32 tray: start/stop, device + cable pickers, re-import, autostart toggle, log access (Tray and first run in §4). Built 2026-10-05: `knobs.exe`, with the menu as designed. `knobs-tray` runs it on a fake core.
+- [x] OBS folder picker when auto-detection fails; remember the choice in `%AppData%\knobs`. Find OBS… in the menu, saved as `Settings::obs_dir`. OBS's settings folder (a portable OBS started with `--portable`) can be set in `settings.ini` but has no picker yet.
+- [ ] OBS coexistence: watch for `obs64.exe`; auto-pause while it runs, resume when it exits (toggleable), and re-import when it exits. Decide whether to pause when OBS doesn't monitor the mic (Tray and first run in §4). The core watches for OBS, pauses, resumes and re-imports (M3 findings), and the tray's Pause while OBS is open turns pausing off. The decision remains.
+- [ ] Detect installed-OBS version change on startup → prompt re-import / runtime refresh (restart the process to load the new copy; prune old copies). The core says a restart is needed when a re-import finds a new version, and stops on an unsupported one. The tray's Restart knobs restarts it. The check at startup and the pruning remain.
 - [x] Device disconnect/reconnect. win-wasapi's reconnect thread only runs after `activate`, which needs the video tick (M0 findings). Choose between the dummy canvas and re-creating the source via `obs_load_source()`; either way, knobs surfaces state rather than reimplementing capture. Decided: re-create the source (M3 findings). Built in the core.
 - [ ] Error surfacing via tray notifications. The core reports each state with what happened; the notifications remain.
 - [ ] First run: one door for a mic already set up in OBS, one for people new to OBS (Tray and first run in §4). The M4 setup guide covers it too.
-- [ ] Exe icon from `assets/knobs.ico`. The tray gets a glyph of its own, with badges for paused and needing the user (Tray and first run in §4). It still needs drawing.
+- [ ] Exe icon from `assets/knobs.ico`. The tray gets a glyph of its own, with badges for paused and needing the user (Tray and first run in §4). `knobs.exe` has the icon, and the tray shows it until the glyph is drawn.
 - [ ] Long-run latency: run the mic into the cable for hours, alongside OBS for comparison, and watch for latency steps and clock drift (M1 findings). If latency creeps up, restarting the monitor resets it. Decide whether knobs should do that, for example while the mic is silent.
 
 **M4 — Ship**
@@ -356,6 +368,12 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 10 (2026-10-05)
+
+- Built the tray shell: `knobs.exe` with the tray icon and the menu as designed, the fix for what needs the user in bold, dark menus, settings in `%AppData%\knobs\settings.ini`, Start with Windows and one copy per session. `knobs-tray` runs it on the real core over a made-up OBS and devices, and saves pictures of the menu. Details under Built: the tray shell (§4).
+- Decided the menu's details: the status line for each state, the fix for each, when Mic and Cable offer "Same as OBS", and that dark menus follow Windows' mode rather than the app mode.
+- The core gained the pause-while-OBS-is-open setting and the name of a picked cable, and its snapshots carry the playback devices, the profile's monitoring device and whether the user paused.
 
 ### Revision notes — Rev 9 (2026-10-05)
 

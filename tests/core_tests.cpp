@@ -320,6 +320,49 @@ TEST(CorePausesWhileObsRunsAndReimportsWhenItExits) {
   CHECK(f.state() == State::kRunning && f.backend.imports == 3 && f.last().chain_revision == 1);
 }
 
+TEST(CoreCanKeepRunningWhileObsRuns) {
+  Fixture f({.pause_for_obs = false});
+  f.controller.Start(true, f.now);
+  CHECK(f.state() == State::kRunning && f.last().obs_running && f.backend.chain_starts == 1);
+
+  // OBS exiting still re-imports, and the same chain carries on.
+  f.controller.SetObsRunning(false, f.now);
+  CHECK(f.state() == State::kRunning && f.backend.imports == 2 && f.backend.chain_starts == 1);
+
+  f.controller.SetObsRunning(true, f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_running);
+  f.controller.Apply({}, f.now);
+  CHECK(f.state() == State::kPausedForObs && !f.backend.chain_running);
+}
+
+TEST(CoreSnapshotHasWhatTheTrayOffers) {
+  Fixture f;
+  f.controller.Start(false, f.now);
+  CHECK(f.last().outputs == DefaultDevices().outputs);
+  CHECK(f.last().obs_cable == (audio::AudioDevice{kCableName, kCableId}));
+  CHECK(!f.last().paused_by_user);
+
+  // A picked cable that isn't connected goes by the name it was picked
+  // under.
+  f.controller.Apply({.cable = kOtherCableId, .cable_name = "CABLE-A Input (VB-Audio Cable A)"}, f.now);
+  CHECK(f.state() == State::kCableMissing && f.last().chain->cable == "CABLE-A Input (VB-Audio Cable A)");
+  CHECK(f.last().detail == "\"CABLE-A Input (VB-Audio Cable A)\" isn't connected.");
+
+  // Paused shows through states that come before it.
+  f.controller.Apply({}, f.now);
+  f.controller.Pause(f.now);
+  CHECK(f.state() == State::kPausedByUser && f.last().paused_by_user);
+  f.backend.config_error = "OBS has no settings yet.";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kNeedsSetup && f.last().paused_by_user);
+  // The profile is unknown again, and so is its cable.
+  CHECK(f.last().obs_cable.id.empty());
+
+  f.backend.devices.outputs.pop_back();
+  f.DevicesChange(f.backend.devices);
+  CHECK(f.last().outputs.size() == 1);
+}
+
 TEST(CoreFollowsChangesMadeInObs) {
   Fixture f;
   f.controller.Start(false, f.now);

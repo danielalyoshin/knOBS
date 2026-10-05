@@ -54,6 +54,27 @@ target_link_libraries(knobs_runtime
   PRIVATE version shell32 ole32
 )
 
+# The project's version, for the code and knobs.exe's version resource.
+configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h @ONLY)
+
+# The tray app's UI, run by knobs.exe, and by knobs-tray on a fake core.
+add_library(knobs_tray STATIC
+  src/tray/autostart.cpp
+  src/tray/menu.cpp
+  src/tray/menu_theme.cpp
+  src/tray/settings_file.cpp
+  src/tray/single_instance.cpp
+  src/tray/tray_app.cpp
+)
+target_include_directories(knobs_tray PUBLIC ${CMAKE_CURRENT_BINARY_DIR}/generated)
+target_link_libraries(knobs_tray PUBLIC knobs_runtime PRIVATE comctl32 shell32)
+
+# The tray app. The manifest asks for per-monitor DPI awareness (v2) and
+# Common Controls 6; the resource compiler finds the icon in assets/.
+add_executable(knobs WIN32 src/main.cpp src/tray/knobs.rc src/tray/knobs.manifest)
+target_include_directories(knobs PRIVATE assets)
+target_link_libraries(knobs PRIVATE knobs_tray ole32 shell32)
+
 # Shared by the dev tools and their unit tests; not part of the app.
 add_library(knobs_tools STATIC
   tools/common/audio_diff.cpp
@@ -88,8 +109,18 @@ target_link_libraries(knobs-compare PRIVATE knobs_tools)
 add_executable(knobs-core tools/core/core_main.cpp)
 target_link_libraries(knobs-core PRIVATE knobs_tools ole32 psapi)
 
-add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp)
-target_link_libraries(knobs-tests PRIVATE knobs_tools delayimp)
+add_executable(knobs-tray
+  tools/tray/tray_main.cpp
+  tools/tray/fake_backend.cpp
+  tools/tray/screenshot.cpp
+  tools/tray/knobs-tray.rc
+  src/tray/knobs.manifest
+)
+target_include_directories(knobs-tray PRIVATE assets)
+target_link_libraries(knobs-tray PRIVATE knobs_tray knobs_tools dwmapi ole32 windowscodecs)
+
+add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp)
+target_link_libraries(knobs-tests PRIVATE knobs_tools knobs_tray delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 

@@ -1,0 +1,7 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
+// knobs-tray.exe's resources: the icon the tray shows.
+
+#include "tray/resource.h"
+
+// assets\knobs.ico, found through the resource compiler's include path.
+IDI_KNOBS ICON "knobs.ico"
