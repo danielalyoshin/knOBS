@@ -2,3 +2,6 @@
 /out/
 /.vs/
 CMakeUserPresets.json
+/.agents/
+/.claude/
+/.codex/
