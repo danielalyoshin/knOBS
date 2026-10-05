@@ -17,7 +17,7 @@ add_library(knobs_options INTERFACE)
 target_compile_options(knobs_options INTERFACE /W4 /permissive- /utf-8 /Zc:__cplusplus /external:W0)
 target_compile_definitions(knobs_options INTERFACE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 
-# Declarations only. knOBS resolves libobs exports at runtime and never links
+# Declarations only. knobs resolves libobs exports at runtime and never links
 # obs.lib (see src/runtime/obs_api.h).
 add_library(libobs_headers INTERFACE)
 target_include_directories(libobs_headers SYSTEM INTERFACE third_party/libobs)
@@ -39,6 +39,7 @@ add_library(knobs_runtime STATIC
   src/runtime/runtime_copy.cpp
   src/util/app_dirs.cpp
   src/util/json.cpp
+  src/util/text_file.cpp
   src/util/win_strings.cpp
 )
 target_include_directories(knobs_runtime PUBLIC src)
@@ -57,8 +58,8 @@ add_library(knobs_tools STATIC
   tools/common/push_source.cpp
   tools/common/sha256.cpp
   tools/common/test_signal.cpp
-  tools/common/text_file.cpp
   tools/common/wav.cpp
+  tools/compare/obs_run.cpp
 )
 target_include_directories(knobs_tools PUBLIC tools)
 target_link_libraries(knobs_tools PUBLIC knobs_runtime PRIVATE bcrypt)
@@ -75,7 +76,7 @@ target_link_libraries(knobs-live PRIVATE knobs_tools ole32)
 add_executable(knobs-import tools/import/import_main.cpp)
 target_link_libraries(knobs-import PRIVATE knobs_tools)
 
-add_executable(knobs-compare tools/compare/compare_main.cpp tools/compare/obs_run.cpp)
+add_executable(knobs-compare tools/compare/compare_main.cpp)
 target_link_libraries(knobs-compare PRIVATE knobs_tools)
 
 add_executable(knobs-tests tests/unit_tests.cpp)

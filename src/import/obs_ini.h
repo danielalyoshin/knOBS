@@ -18,7 +18,7 @@ namespace knobs::import {
 // values, with nothing trimmed but the key's leading whitespace; lines
 // starting with '#' are comments; and \\, \n and \r in values are unescaped.
 // A repeated key or section replaces the earlier one, as libobs's hash
-// lookup finds the last. Read-only: knOBS never writes OBS's settings.
+// lookup finds the last. Read-only: knobs never writes OBS's settings.
 class ObsIni {
  public:
   static ObsIni Parse(std::string_view text);

@@ -6,10 +6,10 @@
 #include <charconv>
 #include <cstdint>
 #include <format>
-#include <fstream>
 #include <optional>
-#include <sstream>
 
+#include "app_info.h"
+#include "util/text_file.h"
 #include "util/win_strings.h"
 
 namespace knobs::import {
@@ -59,32 +59,23 @@ bool Bool(const runtime::ObsApi& api, obs_data_t* data, const char* name, bool m
   return api.obs_data_has_user_value(data, name) ? api.obs_data_get_bool(data, name) : missing;
 }
 
-// The file as libobs's JSON reader takes it: os_quick_read_utf8_file skips a
-// BOM.
-std::optional<std::string> ReadUtf8File(const fs::path& file) {
-  std::ifstream in(file, std::ios::binary);
-  if (!in) return std::nullopt;
-  std::ostringstream text;
-  text << in.rdbuf();
-  std::string contents = text.str();
-  if (contents.starts_with("\xEF\xBB\xBF")) contents.erase(0, 3);
-  return contents;
+// `file` parsed by libobs as its JSON reader takes it: os_quick_read_utf8_file
+// skips a BOM. Null if it doesn't parse.
+obs_data_t* ParseJsonFile(const runtime::ObsApi& api, const fs::path& file) {
+  auto text = ReadText(file);
+  if (!text) return nullptr;
+  if (text->starts_with("\xEF\xBB\xBF")) text->erase(0, 3);
+  return api.obs_data_create_from_json(text->c_str());
 }
 
 // `file` parsed by libobs, else its .bak, as obs_data_create_from_json_file_safe
 // would read them. Null if neither parses.
 obs_data_t* ParseCollection(const runtime::ObsApi& api, const fs::path& file, bool* from_backup) {
   *from_backup = false;
-  if (const auto text = ReadUtf8File(file)) {
-    if (obs_data_t* data = api.obs_data_create_from_json(text->c_str())) return data;
-  }
-  if (const auto text = ReadUtf8File(fs::path(file) += L".bak")) {
-    if (obs_data_t* data = api.obs_data_create_from_json(text->c_str())) {
-      *from_backup = true;
-      return data;
-    }
-  }
-  return nullptr;
+  if (obs_data_t* data = ParseJsonFile(api, file)) return data;
+  obs_data_t* backup = ParseJsonFile(api, fs::path(file) += L".bak");
+  *from_backup = backup != nullptr;
+  return backup;
 }
 
 std::optional<MicCandidate> AsMic(const runtime::ObsApi& api, obs_data_t* source) {
@@ -115,27 +106,27 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
 
   if (id == kVstFilterId) {
     const std::string plugin = settings ? FileName(String(api, settings.get(), "plugin_path")) : "";
-    notes.push_back({enabled, enabled ? std::format("Filter \"{}\" is a VST plugin ({}). knOBS can't run VST "
+    notes.push_back({enabled, enabled ? std::format("Filter \"{}\" is a VST plugin ({}). {} can't run VST "
                                                     "plugins yet, so it leaves the filter out.",
-                                                    name, plugin.empty() ? "none chosen" : plugin)
-                                      : std::format("Filter \"{}\", a VST plugin, is off in OBS. knOBS leaves "
-                                                    "it out.",
-                                                    name)});
+                                                    name, plugin.empty() ? "none chosen" : plugin, kDisplayName)
+                                      : std::format("Filter \"{}\", a VST plugin, is off in OBS. {} leaves it "
+                                                    "out.",
+                                                    name, kDisplayName)});
     return false;
   }
   if (api.obs_get_source_output_flags(type.c_str()) == 0) {
     // libobs knows no such type, so it loads a placeholder that does nothing.
     if (!enabled) {
-      notes.push_back({false, std::format("Filter \"{}\" ({}) isn't one knOBS has, but it's off in OBS anyway.",
-                                          name, type)});
+      notes.push_back({false, std::format("Filter \"{}\" ({}) isn't one {} has, but it's off in OBS anyway.",
+                                          name, type, kDisplayName)});
     } else if (id == kNvidiaFilterId) {
       notes.push_back({true, std::format("Filter \"{}\" is NVIDIA's noise removal, from OBS's nv-filters "
-                                         "module, which knOBS doesn't load. It passes audio through untouched.",
-                                         name)});
+                                         "module, which {} doesn't load. It passes audio through untouched.",
+                                         name, kDisplayName)});
     } else {
-      notes.push_back({true, std::format("Filter \"{}\" ({}) isn't one knOBS has. It passes audio through "
+      notes.push_back({true, std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio through "
                                          "untouched.",
-                                         name, type)});
+                                         name, type, kDisplayName)});
     }
     return true;
   }
@@ -146,9 +137,9 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
   if (id == kCompressorId && settings) {
     const std::string sidechain = String(api, settings.get(), "sidechain_source");
     if (!sidechain.empty() && sidechain != "none") {
-      notes.push_back({true, std::format("Compressor \"{}\" ducks under \"{}\" in OBS. knOBS loads only the mic, "
+      notes.push_back({true, std::format("Compressor \"{}\" ducks under \"{}\" in OBS. {} loads only the mic, "
                                          "so it compresses without that sidechain.",
-                                         name, sidechain)});
+                                         name, sidechain, kDisplayName)});
     }
   }
   return true;
@@ -171,8 +162,8 @@ void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicC
     // obs_source_t's enabled flag counts as muted (obs-source.c).
     notes.push_back({false, std::format("The mic is {} in OBS. libobs's monitor ignores mute, push-to-talk and "
                                         "push-to-mute (OBS 32.2 and later), so the cable gets the mic either way, "
-                                        "from OBS and from knOBS.",
-                                        states)});
+                                        "from OBS and from {}.",
+                                        states, kDisplayName)});
   }
   if (const int64_t sync = api.obs_data_get_int(source, "sync"); sync != 0) {
     notes.push_back({false, std::format("The mic has a sync offset of {} ms. libobs's monitor ignores it for "
@@ -180,7 +171,8 @@ void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicC
                                         sync / 1'000'000)});
   }
   if (!mic.monitored) {
-    notes.push_back({false, "OBS doesn't monitor this mic, so it doesn't send it to a cable. knOBS will."});
+    notes.push_back(
+        {false, std::format("OBS doesn't monitor this mic, so it doesn't send it to a cable. {} will.", kDisplayName)});
   }
 }
 
@@ -229,6 +221,8 @@ Result<std::unique_ptr<SceneCollection>> SceneCollection::Read(const runtime::Ob
 }
 
 SceneCollection::~SceneCollection() { api_.obs_data_release(data_); }
+
+std::string SceneCollection::name() const { return String(api_, data_, "name"); }
 
 std::vector<MicCandidate> SceneCollection::Mics() const {
   std::vector<MicCandidate> mics;
@@ -292,12 +286,6 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic) const {
   if (!json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
   imported.source_json = json;
   return imported;
-}
-
-std::string ReadCollectionName(const runtime::ObsApi& api, const fs::path& file) {
-  bool from_backup = false;
-  DataPtr data = Own(api, ParseCollection(api, file, &from_backup));
-  return data ? String(api, data.get(), "name") : "";
 }
 
 }  // namespace knobs::import

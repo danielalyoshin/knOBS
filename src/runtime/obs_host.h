@@ -17,9 +17,11 @@
 namespace knobs::runtime {
 
 struct HostOptions {
+  // The OBS install to use, already inspected. Default: the one in obs_dir.
+  std::optional<ObsInstall> install;
   // The OBS install to use. Default: FindObsInstall().
   std::optional<std::filesystem::path> obs_dir;
-  // Names this program's logs in %LocalAppData%\knOBS\logs, e.g. L"harness ".
+  // Names this program's logs in %LocalAppData%\knobs\logs, e.g. L"harness ".
   // Required: only logs with this prefix are pruned.
   std::wstring log_prefix;
   size_t kept_logs = 20;

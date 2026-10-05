@@ -60,7 +60,7 @@ struct ChainInfo {
 };
 ChainInfo DescribeChain(const runtime::ObsApi& api, obs_source_t* source);
 
-// knOBS's whole audio path: a loaded source monitored to libobs's monitoring
+// knobs's whole audio path: a loaded source monitored to libobs's monitoring
 // device, and active. libobs does all the processing. MONITOR_ONLY keeps the
 // audio out of libobs's output mix, so the audio thread never touches it.
 // The monitor only plays while the source is active (it checks activate_refs

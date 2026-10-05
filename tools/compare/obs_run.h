@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 
+#include "runtime/obs_api.h"
 #include "runtime/obs_install.h"
 #include "util/result.h"
 
@@ -15,15 +16,20 @@ namespace knobs::tools {
 // A private copy of `install` in `base`\obs-<version>, made once per install
 // and set to portable mode, so OBS keeps a run's settings next to the copy
 // and never touches the user's own. Leaves out what a run doesn't need: debug
-// symbols, the browser source and its Chromium files, and obs-websocket.
+// symbols, the browser source and its Chromium files, obs-websocket, and a
+// portable install's own settings.
 Result<std::filesystem::path> PrepareObsCopy(const runtime::ObsInstall& install, const std::filesystem::path& base);
 
 struct ObsRecording {
   std::filesystem::path copy;  // From PrepareObsCopy.
   runtime::ObsVersion version;
-  // The source to record, as an OBS source object. It's loaded as OBS's
-  // Mic/Aux device, so it's active from the start and mixed into track 1.
-  std::string source_json;
+  // The imported mic (import::ImportedMic::source_json). OBS plays `input`
+  // through a Media Source with its filters and source-level settings.
+  std::string mic_json;
+  // Where the mic came from, which decides how OBS loads it: as an entry of
+  // "sources" in the scene, with its load callbacks, or as the Mic/Aux device.
+  bool mic_from_sources = false;
+  std::filesystem::path input;
   uint32_t sample_rate = 48000;
   std::string channel_setup = "Stereo";  // As in a profile's basic.ini.
   // OBS's output timer stops the recording after this long.
@@ -42,7 +48,7 @@ struct ObsRecordingResult {
 // starts recording track 1 to a 32-bit float WAV through its custom FFmpeg
 // output, stops when the output timer runs out, and is closed. OBS starts
 // minimized to the tray and opens no audio device: nothing in its settings
-// monitors or captures.
-Result<ObsRecordingResult> RecordWithObs(const ObsRecording& run);
+// monitors or captures. `api` builds the source.
+Result<ObsRecordingResult> RecordWithObs(const runtime::ObsApi& api, const ObsRecording& run);
 
 }  // namespace knobs::tools

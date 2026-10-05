@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "common/text_file.h"
+#include "util/text_file.h"
 
 #include <format>
 #include <fstream>
@@ -7,14 +7,15 @@
 
 #include "util/win_strings.h"
 
-namespace knobs::tools {
+namespace knobs {
 
 Result<std::string> ReadText(const std::filesystem::path& file) {
   std::ifstream in(file, std::ios::binary);
   if (!in) return Error{std::format("Couldn't open {}.", ToUtf8(file))};
   std::ostringstream text;
   text << in.rdbuf();
+  if (in.bad()) return Error{std::format("Couldn't read {}.", ToUtf8(file))};
   return text.str();
 }
 
-}  // namespace knobs::tools
+}  // namespace knobs

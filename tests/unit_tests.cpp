@@ -24,6 +24,7 @@
 #include "common/envelope.h"
 #include "common/sha256.h"
 #include "common/wav.h"
+#include "compare/obs_run.h"
 #include "import/mic_import.h"
 #include "import/obs_config.h"
 #include "import/obs_ini.h"
@@ -192,7 +193,7 @@ fs::path MakeFakeInstall(const fs::path& root) {
   WriteFile(bin / L"obs.pdb", "symbols");
   fs::copy_file(self, plugins / L"win-wasapi.dll");
   fs::copy_file(self, plugins / L"obs-filters.dll");
-  fs::copy_file(self, plugins / L"obs-vst.dll");  // Not a module knOBS loads.
+  fs::copy_file(self, plugins / L"obs-vst.dll");  // Not a module knobs loads.
   WriteFile(root / L"data" / L"libobs" / L"default.effect", "effect");
   WriteFile(root / L"data" / L"obs-plugins" / L"win-wasapi" / L"locale" / L"en-US.ini", "a=b");
   WriteFile(root / L"data" / L"obs-plugins" / L"obs-filters" / L"locale" / L"en-US.ini", "c=d");
@@ -484,6 +485,33 @@ TEST(ConfigRootIsPortableWithAMarker) {
   WriteFile(dir.path / L"obs_portable_mode.txt", "");
   auto portable = import::FindObsConfigRoot(dir.path);
   CHECK(portable.ok() && portable->portable && portable->path == dir.path / L"config");
+
+  // A folder given directly is portable if it's that config\ folder.
+  CHECK(import::ObsConfigRootAt(dir.path / L"config").portable);
+  CHECK(import::ObsConfigRootAt(dir.path / L"CONFIG" / L"").portable);
+  CHECK(import::ObsConfigRootAt(dir.path / L"CONFIG" / L"").path == dir.path / L"CONFIG");
+  CHECK(!import::ObsConfigRootAt(dir.path / L"settings").portable);
+  CHECK(!import::ObsConfigRootAt(dir.path).portable);
+}
+
+TEST(ConfigReadsSampleRateLikeObs) {
+  // libobs reads numbers with strtoull: whitespace first and junk after are
+  // fine, and "0x" means hex.
+  TempDir dir(L"rate");
+  const auto rate = [&](std::string_view value) -> std::optional<uint32_t> {
+    WriteObsConfig(dir.path, {{"global.ini", ""},
+                              {"user.ini", "[Basic]\nProfile=P\nSceneCollection=C\n"},
+                              {"basic/profiles/P/basic.ini", std::format("[Audio]\nSampleRate={}\n", value)}});
+    auto config = import::FindActiveObsConfig({dir.path, false});
+    if (!config) return std::nullopt;
+    return config->audio.sample_rate;
+  };
+  CHECK(rate("44100") == 44100u);
+  CHECK(rate(" 48000 ") == 48000u);
+  CHECK(rate("48000Hz") == 48000u);
+  CHECK(rate("0xBB80") == 48000u);
+  CHECK(!rate("fast"));
+  CHECK(!rate("0"));
 }
 
 TEST(ConfigFindsProfileByName) {
@@ -767,13 +795,47 @@ FloatAudio Shifted(const FloatAudio& audio, int64_t frames) {
 
 TEST(AlignAudioFindsOffsetsBothWays) {
   const FloatAudio a = StereoBursts(4, 3);
-  const auto later = AlignAudio(a, Shifted(a, 12345), 48000);
+  const auto later = AlignAudio(a, Shifted(a, 12345), -48000, 48000);
   // 257.19 ms: not a whole number of envelope bins, so the coarse match isn't
   // perfect, but the frame search is.
   CHECK(later.ok() && later->offset == 12345 && later->correlation > 0.9);
-  const auto earlier = AlignAudio(a, Shifted(a, -777), 48000);
+  const auto earlier = AlignAudio(a, Shifted(a, -777), -48000, 48000);
   CHECK(earlier.ok() && earlier->offset == -777);
-  CHECK(!AlignAudio(a, FloatAudio{44100, 2, a.samples}, 48000).ok());
+  CHECK(!AlignAudio(a, FloatAudio{44100, 2, a.samples}, -48000, 48000).ok());
+  // Outside the range searched.
+  const auto outside = AlignAudio(a, Shifted(a, 12345), -48000, 0);
+  CHECK(!outside.ok() || outside->offset != 12345);
+}
+
+TEST(AlignAudioWithMostlySilence) {
+  // knobs-compare's case: a short clip after 5 s of silence, and a recording
+  // that starts 1.5 s into it and runs 2 s past it. Only the clip lines up.
+  const FloatAudio clip = StereoBursts(1.5, 11);
+  FloatAudio ours{48000, 2, std::vector<float>(5 * 48000 * 2, 0.0f)};
+  ours.samples.insert(ours.samples.end(), clip.samples.begin(), clip.samples.end());
+  FloatAudio theirs = Shifted(ours, -72000);
+  theirs.samples.resize(theirs.samples.size() + 2 * 48000 * 2, 0.0f);
+  const auto alignment = AlignAudio(ours, theirs, -8 * 48000, 2 * 48000);
+  CHECK(alignment.ok() && alignment->offset == -72000);
+}
+
+TEST(DiffAudioComparesBits) {
+  const FloatAudio a{48000, 1, {0.0f, 0.5f, 0.25f}};
+  const AudioDiff zeros = DiffAudio(a, FloatAudio{48000, 1, {-0.0f, 0.5f, 0.25f}}, 0);
+  CHECK(!zeros.bit_identical() && zeros.identical_samples == 2 && zeros.residual_peak == 0);
+  const AudioDiff nan = DiffAudio(a, FloatAudio{48000, 1, {0.0f, std::nanf(""), 0.0f}}, 0);
+  CHECK(std::isnan(nan.residual_peak) && std::isnan(nan.residual_rms));
+  CHECK(DiffAudio(a, a, 0).bit_identical());
+}
+
+TEST(MixLikeObsMatchesLibobs) {
+  FloatAudio audio{48000, 1, {0.5f, 1.5f, -2.0f, std::nanf(""), 1.0f, -0.0f, -1e-40f}};
+  const MixChanges changes = MixLikeObs(audio);
+  CHECK(changes.clamped == 3 && changes.negative_zeros == 1);
+  CHECK(audio.samples[0] == 0.5f && audio.samples[1] == 1.0f && audio.samples[2] == -1.0f);
+  CHECK(audio.samples[3] == 0.0f && audio.samples[4] == 1.0f);
+  CHECK(audio.samples[5] == 0.0f && !std::signbit(audio.samples[5]));
+  CHECK(audio.samples[6] == -1e-40f);  // Denormals pass through.
 }
 
 TEST(DiffAudioMeasuresTheResidual) {
@@ -797,6 +859,50 @@ TEST(DiffAudioMeasuresTheResidual) {
   for (float& x : quiet.samples) x *= 0.5f;
   CHECK(std::fabs(ToDb(DiffAudio(a, quiet, 0).gain) - 6.0206) < 0.001);
   CHECK(DiffAudio(a, b, 1'000'000).frames == 0);
+}
+
+// --- knobs-compare's OBS copy --------------------------------------------------
+
+TEST(ObsCopyLeavesOutSettingsAndSwapsWhole) {
+  TempDir dir(L"obscopy");
+  const fs::path install = dir.path / L"install";
+  const fs::path work = dir.path / L"work";
+  WriteFile(install / L"bin" / L"64bit" / L"obs.dll", "v1");
+  WriteFile(install / L"bin" / L"64bit" / L"obs64.exe", "exe");
+  WriteFile(install / L"bin" / L"64bit" / L"obs.pdb", "symbols");
+  WriteFile(install / L"obs-plugins" / L"64bit" / L"obs-filters.dll", "filters");
+  WriteFile(install / L"obs-plugins" / L"64bit" / L"libcef.dll", "chromium");
+  WriteFile(install / L"obs-plugins" / L"64bit" / L"locales" / L"en-US.pak", "pak");
+  WriteFile(install / L"data" / L"obs-plugins" / L"obs-browser" / L"page.html", "browser");
+  // A portable install's own settings stay out of the copy.
+  WriteFile(install / L"config" / L"obs-studio" / L"global.ini", "private");
+  WriteFile(install / L"obs_portable_mode.txt", "");
+  const ObsInstall obs{install, {32, 2, 2}};
+
+  auto copy = PrepareObsCopy(obs, work);
+  CHECK(copy.ok());
+  if (!copy) return;
+  CHECK(fs::exists(*copy / L"bin" / L"64bit" / L"obs64.exe"));
+  CHECK(fs::exists(*copy / L"obs-plugins" / L"64bit" / L"obs-filters.dll"));
+  CHECK(!fs::exists(*copy / L"bin" / L"64bit" / L"obs.pdb"));
+  CHECK(!fs::exists(*copy / L"obs-plugins" / L"64bit" / L"libcef.dll"));
+  CHECK(!fs::exists(*copy / L"obs-plugins" / L"64bit" / L"locales"));
+  CHECK(!fs::exists(*copy / L"data" / L"obs-plugins" / L"obs-browser"));
+  CHECK(!fs::exists(*copy / L"config") && !fs::exists(*copy / L"obs_portable_mode.txt"));
+  CHECK(fs::exists(*copy / L"portable_mode.txt"));  // The copy's own.
+
+  // Reused while the install is the same, replaced whole when it changes.
+  WriteFile(*copy / L"bin" / L"64bit" / L"left-over.txt", "");
+  CHECK(PrepareObsCopy(obs, work).ok() && fs::exists(*copy / L"bin" / L"64bit" / L"left-over.txt"));
+  WriteFile(install / L"bin" / L"64bit" / L"obs.dll", "v2, a different size");
+  auto replaced = PrepareObsCopy(obs, work);
+  CHECK(replaced.ok() && !fs::exists(*copy / L"bin" / L"64bit" / L"left-over.txt"));
+  CHECK(!fs::exists(work / L"obs-32.2.2.old") && !fs::exists(work / L"obs-32.2.2.partial"));
+
+  // A folder that isn't a copy made here is never replaced.
+  fs::remove(*copy / L"knobs-copy.txt");
+  WriteFile(install / L"bin" / L"64bit" / L"obs.dll", "v3, a different size again");
+  CHECK(!PrepareObsCopy(obs, work).ok() && fs::exists(*copy / L"bin" / L"64bit" / L"obs64.exe"));
 }
 
 TEST(EnvelopeIgnoresFramesOffTheGrid) {

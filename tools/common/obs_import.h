@@ -2,18 +2,19 @@
 #pragma once
 
 #include <filesystem>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "import/mic_import.h"
 #include "import/obs_config.h"
 #include "runtime/obs_host.h"
-#include "runtime/obs_install.h"
 #include "util/result.h"
 
-// Importing the mic from OBS's settings, for the tools that take --import.
-// Each step is reported on the console as it goes.
+// How the tools start libobs and import the mic from OBS's settings. Each
+// step is reported on the console as it goes.
 namespace knobs::tools {
 
 struct ImportArgs {
@@ -22,6 +23,9 @@ struct ImportArgs {
   std::optional<std::filesystem::path> config_dir;
   // Which mic, by number or name (import::PickMic).
   std::string pick;
+
+  // Whether any was given: they only mean something with an import.
+  bool given() const { return config_dir || !pick.empty(); }
 };
 
 // Usage lines for the options above.
@@ -36,14 +40,28 @@ inline constexpr std::string_view kImportUsage =
 // sets `bad` if it is one but `value` is missing.
 bool ParseImportArg(std::wstring_view arg, const wchar_t* value, ImportArgs& args, bool& bad);
 
-// Before libobs starts: finds OBS's active profile and scene collection.
-Result<import::ActiveObsConfig> FindObsConfig(const ImportArgs& args, const runtime::ObsInstall& install);
+struct ToolStartOptions {
+  std::optional<std::filesystem::path> obs_dir;  // --obs-dir
+  std::wstring log_prefix;                       // See runtime::HostOptions.
+  bool verbose = false;
+  // Import the mic: find OBS's active profile, and run libobs at its sample
+  // rate and channel layout, as OBS does.
+  bool import = false;
+  ImportArgs import_args;
+};
 
-// Runs libobs at the profile's sample rate and channel layout, as OBS does.
-void UseProfileAudio(const import::ActiveObsConfig& config, runtime::HostOptions& options);
+struct StartedTool {
+  std::unique_ptr<runtime::ObsHost> host;
+  std::optional<import::ActiveObsConfig> config;  // When importing.
+};
 
-// Once libobs runs: reads the collection, picks the mic and runs the
-// pre-flight checks.
+// Finds the OBS install, finds OBS's active profile when importing, and
+// starts libobs. If that fails, it's reported and the result is the exit
+// code to end with: kExitSkip when OBS isn't installed, kExitFail otherwise.
+std::variant<StartedTool, int> StartTool(const ToolStartOptions& options);
+
+// Once libobs runs: reads the active scene collection, picks the mic and
+// runs the pre-flight checks.
 Result<import::ImportedMic> ImportMic(const runtime::ObsApi& api, const import::ActiveObsConfig& config,
                                       const ImportArgs& args);
 

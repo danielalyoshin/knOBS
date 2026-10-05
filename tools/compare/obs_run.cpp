@@ -13,8 +13,10 @@
 #include <thread>
 #include <vector>
 
-#include "common/text_file.h"
+#include "app_info.h"
 #include "runtime/obs_layout.h"
+#include "util/json.h"
+#include "util/text_file.h"
 #include "util/win_strings.h"
 
 namespace knobs::tools {
@@ -25,17 +27,19 @@ using namespace std::chrono_literals;
 
 // Written last, so a copy without it is incomplete.
 constexpr wchar_t kCopyMarker[] = L"knobs-copy.txt";
-constexpr char kProfileName[] = "knOBS comparison";
-constexpr wchar_t kProfileDir[] = L"knOBS";
-constexpr char kCollectionName[] = "knOBS comparison";
-constexpr wchar_t kCollectionFile[] = L"knOBS.json";
 // Logged by OBSBasic::RecordingStart and RecordingStop.
 constexpr std::string_view kRecordingStart = "==== Recording Start ====";
 constexpr std::string_view kRecordingStop = "==== Recording Stop ====";
 // FFmpeg's AV_CODEC_ID_PCM_F32LE, which OBS's custom output setting stores
 // next to the encoder's name.
 constexpr int kPcmF32Le = 0x10015;
+// The Media Source's, so the scene item can find it (obs-scene.c,
+// scene_load_item).
+constexpr char kSourceUuid[] = "6b6e6f62-7300-4000-8000-000000000001";
 
+// Next to bin\ (obs-main.cpp). The copy gets its own.
+constexpr std::array<std::wstring_view, 4> kPortableMarkers = {L"portable_mode", L"obs_portable_mode",
+                                                               L"portable_mode.txt", L"obs_portable_mode.txt"};
 // The browser source and its Chromium files in obs-plugins\64bit.
 constexpr std::array<std::wstring_view, 10> kBrowserFiles = {
     L"libcef.dll",  L"chrome_elf.dll",     L"libegl.dll",          L"libglesv2.dll",
@@ -54,6 +58,13 @@ bool LeftOut(const fs::path& relative) {
   if (relative.extension() == L".pdb" || name == L"uninstall.exe") return true;
   std::vector<std::wstring> parts;
   for (const fs::path& part : relative) parts.push_back(Lower(part.native()));
+  if (parts.size() == 1) {
+    // A portable install's settings, and its portable-mode marker.
+    if (name == L"config") return true;
+    for (const std::wstring_view marker : kPortableMarkers) {
+      if (name == marker) return true;
+    }
+  }
   if (parts.size() >= 3 && parts[0] == L"obs-plugins" && parts[1] == L"64bit") {
     if (parts[2] == L"locales" || name.starts_with(L"obs-browser") || name.starts_with(L"obs-websocket") ||
         relative.extension() == L".pak") {
@@ -85,8 +96,99 @@ Status WriteText(const fs::path& file, std::string_view text) {
   return Ok{};
 }
 
+// Deletes a folder this file made, and says so if it can't.
+Status Clear(const fs::path& folder) {
+  std::error_code ec;
+  fs::remove_all(folder, ec);
+  if (ec || fs::exists(folder, ec)) {
+    return Error{std::format("Couldn't clear {}: {}. Is an OBS from an earlier run still open?", ToUtf8(folder),
+                             ec ? ec.message() : "it's still there")};
+  }
+  return Ok{};
+}
+
+// The mic as a Media Source playing `input`: the same filters and
+// source-level state (balance, Mono), with what would keep it out of the
+// recording or change its level turned off. knobs-compare's side leaves the
+// volume out too, so both compare what the filters output.
+Result<std::string> MediaSourceJson(const runtime::ObsApi& api, const ObsRecording& run, std::string* name) {
+  obs_data_t* source = api.obs_data_create_from_json(run.mic_json.c_str());
+  if (!source) return Error{"libobs couldn't read the imported mic."};
+  api.obs_data_set_string(source, "id", "ffmpeg_source");
+  api.obs_data_set_string(source, "versioned_id", "ffmpeg_source");
+  obs_data_t* settings = api.obs_data_create();
+  api.obs_data_set_string(settings, "local_file", ToObsPath(run.input).c_str());
+  api.obs_data_set_bool(settings, "is_local_file", true);
+  api.obs_data_set_bool(settings, "looping", false);
+  api.obs_data_set_bool(settings, "restart_on_activate", false);
+  api.obs_data_set_bool(settings, "close_when_inactive", false);
+  api.obs_data_set_bool(settings, "hw_decode", false);
+  api.obs_data_set_obj(source, "settings", settings);
+  api.obs_data_release(settings);
+  api.obs_data_set_double(source, "volume", 1.0);
+  api.obs_data_set_int(source, "sync", 0);
+  api.obs_data_set_int(source, "mixers", 1);  // Track 1, which the recording takes.
+  api.obs_data_set_bool(source, "enabled", true);
+  api.obs_data_set_bool(source, "muted", false);
+  api.obs_data_set_bool(source, "push-to-talk", false);
+  api.obs_data_set_bool(source, "push-to-mute", false);
+  api.obs_data_set_int(source, "monitoring_type", OBS_MONITORING_TYPE_NONE);
+  api.obs_data_set_bool(source, "monitoring_enabled", false);
+  api.obs_data_set_string(source, "uuid", kSourceUuid);
+  api.obs_data_erase(source, "hotkeys");
+  const char* found_name = api.obs_data_get_string(source, "name");
+  *name = found_name ? found_name : "";
+  const char* json = api.obs_data_get_json(source);
+  std::string text = json ? json : "";
+  api.obs_data_release(source);
+  if (text.empty()) return Error{"libobs couldn't write the media source."};
+  return text;
+}
+
+// The scene collection: the source where the mic was (in the scene, or as
+// Mic/Aux), and the output timer (frontend-tools) set to stop the recording.
+std::string CollectionJson(const ObsRecording& run, const std::string& source_json, const std::string& source_name,
+                           std::string_view collection_name) {
+  const std::string items =
+      run.mic_from_sources
+          ? std::format(R"([{{"name": {}, "source_uuid": "{}", "visible": true, "locked": false, "id": 1}}])",
+                        JsonQuote(source_name), kSourceUuid)
+          : "[]";
+  const std::string scene = std::format(
+      R"({{"id": "scene", "versioned_id": "scene", "name": "Scene",
+      "settings": {{"id_counter": 1, "custom_size": false, "items": {}}}}})",
+      items);
+  const std::string sources = run.mic_from_sources ? std::format("[\n    {},\n    {}\n  ]", scene, source_json)
+                                                   : std::format("[\n    {}\n  ]", scene);
+  const std::string device = run.mic_from_sources ? "" : std::format(R"(  "AuxAudioDevice1": {},
+)",
+                                                                     source_json);
+  const int seconds = run.seconds;
+  return std::format(R"({{
+  "name": {0},
+  "current_scene": "Scene",
+  "current_program_scene": "Scene",
+  "scene_order": [{{"name": "Scene"}}],
+  "sources": {1},
+{2}  "modules": {{
+    "output-timer": {{
+      "streamTimerHours": 0, "streamTimerMinutes": 0, "streamTimerSeconds": 30,
+      "recordTimerHours": {3}, "recordTimerMinutes": {4}, "recordTimerSeconds": {5},
+      "autoStartStreamTimer": false, "autoStartRecordTimer": true, "pauseRecordTimer": true
+    }}
+  }},
+  "version": 2
+}}
+)",
+                     JsonQuote(collection_name), sources, device, seconds / 3600, seconds / 60 % 60, seconds % 60);
+}
+
 // OBS's settings for the run, in the copy's portable config folder.
-Status WriteSettings(const ObsRecording& run, const fs::path& obs_studio, const fs::path& recordings) {
+Status WriteSettings(const runtime::ObsApi& api, const ObsRecording& run, const fs::path& obs_studio,
+                     const fs::path& recordings) {
+  const std::string name = std::format("{} comparison", kDisplayName);
+  const std::wstring profile_dir(kDisplayNameW);
+  const std::wstring collection_file = std::wstring(kDisplayNameW) + L".json";
   const uint32_t packed = (run.version.major << 24) | (run.version.minor << 16) | run.version.patch;
   // A known LastVersion and FirstRun skip the first-run wizard and the
   // what's-new dialog.
@@ -95,25 +197,24 @@ Status WriteSettings(const ObsRecording& run, const fs::path& obs_studio, const 
                                                                      "EnableAutoUpdates=false\r\n",
                                                                      packed));
   if (!written) return written;
-  written = WriteText(obs_studio / L"user.ini", std::format("[General]\r\n"
-                                                            "FirstRun=true\r\n"
-                                                            "ConfirmOnExit=false\r\n"
-                                                            "\r\n"
-                                                            "[BasicWindow]\r\n"
-                                                            "SysTrayEnabled=true\r\n"
-                                                            "\r\n"
-                                                            "[Basic]\r\n"
-                                                            "Profile={0}\r\n"
-                                                            "ProfileDir={1}\r\n"
-                                                            "SceneCollection={2}\r\n"
-                                                            "SceneCollectionFile={3}\r\n",
-                                                            kProfileName, ToUtf8(std::wstring_view(kProfileDir)),
-                                                            kCollectionName,
-                                                            ToUtf8(std::wstring_view(kCollectionFile))));
+  written = WriteText(obs_studio / L"user.ini",
+                      std::format("[General]\r\n"
+                                  "FirstRun=true\r\n"
+                                  "ConfirmOnExit=false\r\n"
+                                  "\r\n"
+                                  "[BasicWindow]\r\n"
+                                  "SysTrayEnabled=true\r\n"
+                                  "\r\n"
+                                  "[Basic]\r\n"
+                                  "Profile={0}\r\n"
+                                  "ProfileDir={1}\r\n"
+                                  "SceneCollection={0}\r\n"
+                                  "SceneCollectionFile={2}\r\n",
+                                  name, ToUtf8(profile_dir), ToUtf8(collection_file)));
   if (!written) return written;
   // Advanced output, recording with the custom FFmpeg output: a WAV file with
   // 32-bit float PCM from track 1, and no video stream (WAV has none).
-  written = WriteText(obs_studio / L"basic" / L"profiles" / kProfileDir / L"basic.ini",
+  written = WriteText(obs_studio / L"basic" / L"profiles" / profile_dir / L"basic.ini",
                       std::format("[General]\r\n"
                                   "Name={}\r\n"
                                   "\r\n"
@@ -147,34 +248,13 @@ Status WriteSettings(const ObsRecording& run, const fs::path& obs_studio, const 
                                   "OutputCY=360\r\n"
                                   "FPSType=0\r\n"
                                   "FPSCommon=30\r\n",
-                                  kProfileName, ToObsPath(recordings), kPcmF32Le, run.sample_rate,
-                                  run.channel_setup));
+                                  name, ToObsPath(recordings), kPcmF32Le, run.sample_rate, run.channel_setup));
   if (!written) return written;
-  // The source as the Mic/Aux device, an empty scene, and the output timer
-  // (frontend-tools) set to stop the recording.
-  const int seconds = run.seconds;
-  return WriteText(obs_studio / L"basic" / L"scenes" / kCollectionFile,
-                   std::format(R"({{
-  "name": "{0}",
-  "current_scene": "Scene",
-  "current_program_scene": "Scene",
-  "scene_order": [{{"name": "Scene"}}],
-  "sources": [
-    {{"id": "scene", "versioned_id": "scene", "name": "Scene",
-      "settings": {{"id_counter": 0, "custom_size": false, "items": []}}}}
-  ],
-  "AuxAudioDevice1": {1},
-  "modules": {{
-    "output-timer": {{
-      "streamTimerHours": 0, "streamTimerMinutes": 0, "streamTimerSeconds": 30,
-      "recordTimerHours": {2}, "recordTimerMinutes": {3}, "recordTimerSeconds": {4},
-      "autoStartStreamTimer": false, "autoStartRecordTimer": true, "pauseRecordTimer": true
-    }}
-  }},
-  "version": 2
-}}
-)",
-                               kCollectionName, run.source_json, seconds / 3600, seconds / 60 % 60, seconds % 60));
+  std::string source_name;
+  auto source = MediaSourceJson(api, run, &source_name);
+  if (!source) return Error{source.error()};
+  return WriteText(obs_studio / L"basic" / L"scenes" / collection_file,
+                   CollectionJson(run, *source, source_name, name));
 }
 
 // The newest log OBS has written, or "".
@@ -216,11 +296,20 @@ Result<fs::path> PrepareObsCopy(const runtime::ObsInstall& install, const fs::pa
   const fs::path copy = base / name;
   const std::string stamp = InstallStamp(install);
   if (auto marker = ReadText(copy / kCopyMarker); marker && *marker == stamp) return copy;
-
-  // Into a staging folder first, so an interrupted copy is never used.
-  const fs::path staging = base / (name + L".partial");
   std::error_code ec;
-  fs::remove_all(staging, ec);
+  if (fs::exists(copy, ec) && !fs::exists(copy / kCopyMarker, ec)) {
+    // Only ever replace a copy made here.
+    return Error{std::format("{} exists and isn't a copy of OBS made by knobs-compare.", ToUtf8(copy))};
+  }
+
+  // Into a staging folder first, so an interrupted copy is never used. Both
+  // it and the folder an old copy is moved aside to are this file's own.
+  const fs::path staging = base / (name + L".partial");
+  const fs::path old = base / (name + L".old");
+  for (const fs::path& folder : {staging, old}) {
+    const Status cleared = Clear(folder);
+    if (!cleared) return Error{cleared.error()};
+  }
   fs::create_directories(staging, ec);
   if (ec) return Error{std::format("Couldn't create {}.", ToUtf8(staging))};
   for (fs::recursive_directory_iterator it(install.root, ec), end; !ec && it != end; it.increment(ec)) {
@@ -243,30 +332,31 @@ Result<fs::path> PrepareObsCopy(const runtime::ObsInstall& install, const fs::pa
   if (written) written = WriteText(staging / kCopyMarker, stamp);
   if (!written) return Error{written.error()};
 
+  // Swapped by renaming, so an interruption leaves either copy whole.
   if (fs::exists(copy, ec)) {
-    // Only ever replace a copy made here.
-    if (!fs::exists(copy / kCopyMarker, ec)) {
-      return Error{std::format("{} exists and isn't a copy of OBS made by knobs-compare.", ToUtf8(copy))};
-    }
-    fs::remove_all(copy, ec);
-    if (ec) return Error{std::format("Couldn't replace {}: {}", ToUtf8(copy), ec.message())};
+    fs::rename(copy, old, ec);
+    if (ec) return Error{std::format("Couldn't move the old copy aside from {}: {}", ToUtf8(copy), ec.message())};
   }
   fs::rename(staging, copy, ec);
   if (ec) return Error{std::format("Couldn't move the copy to {}: {}", ToUtf8(copy), ec.message())};
+  Clear(old);  // Cleared next time if it's still in use.
   return copy;
 }
 
-Result<ObsRecordingResult> RecordWithObs(const ObsRecording& run) {
-  // Both folders are the copy's own, recreated for every run.
+Result<ObsRecordingResult> RecordWithObs(const runtime::ObsApi& api, const ObsRecording& run) {
+  // Both folders are the copy's own, recreated for every run, so a failed
+  // run can't leave an earlier recording to be taken for its own.
   const fs::path config = run.copy / L"config";
   const fs::path recordings = run.copy / L"recordings";
+  for (const fs::path& folder : {config, recordings}) {
+    const Status cleared = Clear(folder);
+    if (!cleared) return Error{cleared.error()};
+  }
   std::error_code ec;
-  fs::remove_all(config, ec);
-  fs::remove_all(recordings, ec);
   fs::create_directories(recordings, ec);
-  if (ec) return Error{std::format("Couldn't set up {}: {}", ToUtf8(run.copy), ec.message())};
+  if (ec) return Error{std::format("Couldn't create {}: {}", ToUtf8(recordings), ec.message())};
   const fs::path obs_studio = config / L"obs-studio";
-  const Status written = WriteSettings(run, obs_studio, recordings);
+  const Status written = WriteSettings(api, run, obs_studio, recordings);
   if (!written) return Error{written.error()};
 
   const fs::path bin = runtime::BinDir(run.copy);
@@ -315,6 +405,7 @@ Result<ObsRecordingResult> RecordWithObs(const ObsRecording& run) {
   CloseHandle(process.hProcess);
   const std::string log_note = log.empty() ? "" : std::format(" OBS's log: {}", ToUtf8(log));
   if (failure) return Error{*failure + log_note};
+  if (!recording) return Error{"OBS stopped recording without starting it." + log_note};
 
   for (fs::directory_iterator it(recordings, ec), end; !ec && it != end; it.increment(ec)) {
     if (it->path().extension() == L".wav") {

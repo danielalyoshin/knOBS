@@ -1,11 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "import/obs_ini.h"
 
-#include <format>
-#include <fstream>
-#include <sstream>
-
-#include "util/win_strings.h"
+#include "util/text_file.h"
 
 namespace knobs::import {
 namespace {
@@ -92,12 +88,9 @@ ObsIni ObsIni::Parse(std::string_view text) {
 }
 
 Result<ObsIni> ObsIni::Read(const std::filesystem::path& file) {
-  std::ifstream in(file, std::ios::binary);
-  if (!in) return Error{std::format("Couldn't open {}.", ToUtf8(file))};
-  std::ostringstream text;
-  text << in.rdbuf();
-  if (in.bad()) return Error{std::format("Couldn't read {}.", ToUtf8(file))};
-  return Parse(text.str());
+  auto text = ReadText(file);
+  if (!text) return Error{text.error()};
+  return Parse(*text);
 }
 
 std::optional<std::string> ObsIni::Get(std::string_view section, std::string_view key) const {

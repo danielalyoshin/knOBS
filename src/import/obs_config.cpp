@@ -2,7 +2,7 @@
 #include "import/obs_config.h"
 
 #include <array>
-#include <charconv>
+#include <cstdlib>
 #include <format>
 #include <optional>
 #include <string_view>
@@ -30,6 +30,21 @@ bool Exists(const fs::path& path) {
   return fs::exists(path, ec);
 }
 
+bool IsPortableInstall(const fs::path& install_root) {
+  for (const std::wstring_view marker : kPortableMarkers) {
+    if (Exists(install_root / marker)) return true;
+  }
+  return false;
+}
+
+// How OBS reads a number setting (config-file.c, str_to_uint64): strtoull,
+// in hex after "0x", so leading whitespace and trailing junk are fine and
+// anything else reads as 0. OBSBasic::ResetAudio keeps the low 32 bits.
+uint32_t ObsUint(const std::string& text) {
+  if (text.starts_with("0x")) return static_cast<uint32_t>(std::strtoull(text.c_str() + 2, nullptr, 16));
+  return static_cast<uint32_t>(std::strtoull(text.c_str(), nullptr, 10));
+}
+
 // A [Locations] folder from global.ini, used only if it exists; otherwise,
 // and always in portable mode, the config root (OBSApp::InitGlobalConfig).
 fs::path Location(const ObsIni* global, const ObsConfigRoot& root, std::string_view key) {
@@ -53,12 +68,11 @@ speaker_layout SpeakersFor(std::string_view setup) {
 Result<ProfileAudio> ReadProfileAudio(const ObsIni& basic, const fs::path& file) {
   ProfileAudio audio;
   if (const auto rate = basic.Get("Audio", "SampleRate")) {
-    uint32_t value = 0;
-    const auto [end, ec] = std::from_chars(rate->data(), rate->data() + rate->size(), value);
-    if (ec != std::errc() || end != rate->data() + rate->size() || value == 0) {
+    // OBS can't start its audio at 0 Hz either.
+    audio.sample_rate = ObsUint(*rate);
+    if (audio.sample_rate == 0) {
       return Error{std::format("{} has an invalid sample rate ({}).", ToUtf8(file), *rate)};
     }
-    audio.sample_rate = value;
   }
   if (const auto setup = basic.Get("Audio", "ChannelSetup")) audio.channel_setup = *setup;
   audio.speakers = SpeakersFor(audio.channel_setup);
@@ -70,13 +84,17 @@ Result<ProfileAudio> ReadProfileAudio(const ObsIni& basic, const fs::path& file)
 }  // namespace
 
 Result<ObsConfigRoot> FindObsConfigRoot(const fs::path& install_root) {
-  for (const std::wstring_view marker : kPortableMarkers) {
-    if (Exists(install_root / marker)) return ObsConfigRoot{install_root / L"config", true};
-  }
+  if (IsPortableInstall(install_root)) return ObsConfigRoot{install_root / L"config", true};
   auto dirs = GetAppDirs();
   if (!dirs) return Error{dirs.error()};
-  // %AppData%, the parent of knOBS's own roaming folder.
+  // %AppData%, the parent of knobs's own roaming folder.
   return ObsConfigRoot{dirs->roaming.parent_path(), false};
+}
+
+ObsConfigRoot ObsConfigRootAt(const fs::path& folder) {
+  const fs::path path = folder.has_filename() ? folder : folder.parent_path();
+  const bool portable = AsciiLower(ToUtf8(path.filename())) == "config" && IsPortableInstall(path.parent_path());
+  return {path, portable};
 }
 
 Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {

@@ -1,13 +1,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 <#
 .SYNOPSIS
-Vendors the libobs headers knOBS compiles against into third_party/libobs.
+Vendors the libobs headers knobs compiles against into third_party/libobs.
 
 .DESCRIPTION
-Copies the include closure of the headers knOBS uses (obs.h, util/base.h,
-util/bmem.h) from obs-studio's libobs/ at the given tag. knOBS never links
+Copies the include closure of the headers knobs uses (obs.h, util/base.h,
+util/bmem.h) from obs-studio's libobs/ at the given tag. knobs never links
 libobs; the headers only supply declarations for the GetProcAddress
-function table, so they must match the OBS version knOBS is tested against.
+function table, so they must match the OBS version knobs is tested against.
 
 Also writes a stub for obsconfig.h, which obs-studio generates at build
 time, and a README recording the tag and commit.
@@ -102,7 +102,7 @@ $utf8 = New-Object System.Text.UTF8Encoding $false
 $obsconfig = @'
 // SPDX-License-Identifier: GPL-2.0-or-later
 // Stand-in for the obsconfig.h that obs-studio generates from
-// libobs/obsconfig.h.in at build time. knOBS only uses declarations from the
+// libobs/obsconfig.h.in at build time. knobs only uses declarations from the
 // libobs headers, so none of the build paths or feature flags apply.
 #pragma once
 
@@ -115,8 +115,8 @@ $headerList = ($seen.Keys | Sort-Object | ForEach-Object { "- ``$_``" }) -join "
 $readme = @"
 # libobs headers (obs-studio $Tag)
 
-Declarations knOBS compiles its ``GetProcAddress`` function table against.
-knOBS never links libobs and never ships it; at runtime it loads the user's
+Declarations knobs compiles its ``GetProcAddress`` function table against.
+knobs never links libobs and never ships it; at runtime it loads the user's
 installed ``obs.dll`` from a shadow copy.
 
 - Source: https://github.com/obsproject/obs-studio/tree/$Tag/libobs
@@ -124,7 +124,7 @@ installed ``obs.dll`` from a shadow copy.
 - License: GPL-2.0-or-later, as stated in each file.
 
 Only the include closure of ``obs.h``, ``util/base.h`` and ``util/bmem.h`` is
-vendored. ``obsconfig.h`` is a knOBS stub for the header obs-studio generates
+vendored. ``obsconfig.h`` is a knobs stub for the header obs-studio generates
 at build time.
 
 Don't edit these files. Regenerate them for another tag with:

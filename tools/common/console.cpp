@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "common/console.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <format>
@@ -52,6 +53,12 @@ void ReportChain(const audio::ChainInfo& chain) {
 
 std::string FormatPeak(float peak) {
   return peak > 0 ? std::format("{:.1f} dBFS", 20 * std::log10(peak)) : std::string("silence");
+}
+
+std::string FormatPeakOf(const std::vector<float>& samples) {
+  float peak = 0;
+  for (const float x : samples) peak = std::max(peak, std::fabs(x));
+  return FormatPeak(peak);
 }
 
 int FinishRun(runtime::ObsHost& host) {

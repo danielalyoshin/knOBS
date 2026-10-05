@@ -7,11 +7,11 @@
 
 namespace knobs {
 
-// knOBS's own state. %AppData%\obs-studio is read-only to knOBS; nothing
+// knobs's own state. %AppData%\obs-studio is read-only to knobs; nothing
 // here points into it.
 struct AppDirs {
-  std::filesystem::path roaming;  // %AppData%\knOBS
-  std::filesystem::path local;    // %LocalAppData%\knOBS
+  std::filesystem::path roaming;  // %AppData%\knobs
+  std::filesystem::path local;    // %LocalAppData%\knobs
 
   // Shadow copies of the user's OBS runtime, one folder per OBS version.
   std::filesystem::path RuntimeBase() const { return local / L"runtime"; }

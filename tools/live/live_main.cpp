@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// knobs-live: runs knOBS's live audio path (a source through an OBS filter
+// knobs-live: runs knobs's live audio path (a source through an OBS filter
 // chain, and libobs's monitor into a virtual cable) and measures it.
 //
 // Only --run and --measure-mic open the mic, and they say so first. What the
@@ -22,6 +22,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "app_info.h"
@@ -32,9 +33,9 @@
 #include "common/obs_import.h"
 #include "common/push_source.h"
 #include "common/random.h"
-#include "common/text_file.h"
 #include "live/endpoints.h"
 #include "runtime/obs_host.h"
+#include "util/text_file.h"
 #include "util/win_strings.h"
 
 namespace {
@@ -80,12 +81,15 @@ Options:
                            with its filters and source-level state, at the profile's
                            sample rate and channels.
 {2}
-  --output <name|id>       Playback device to monitor to. Default: the OBS profile's
-                           monitoring device with --import, else "CABLE Input".
+  --output <name|id>       Playback device to monitor to. Default: "CABLE Input", or
+                           with --import, the OBS profile's monitoring device. A profile
+                           left at "Default" monitors to the default playback device,
+                           usually speakers, so that needs --output.
   --listen <name|id>       Recording side of that cable. Default: "CABLE Output".
   --mic <name|id>          The mic for the mic + gain chain, and the one --measure-mic
-                           compares with. Default: the imported mic's device with
-                           --import, else "default", the default communications device.
+                           compares with. Default: "default", the default
+                           communications device. With --import, the chain opens the
+                           imported mic's device, so only --external takes --mic.
   --gain-db <x>            The gain filter's setting (default 0).
   --source <file.json>     Use this OBS source object (one entry of a scene
                            collection's "sources") instead of the mic + gain chain.
@@ -189,8 +193,9 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
   if (options.mode == Mode::kNone) return std::nullopt;
   if (options.external && options.mode != Mode::kMeasureMic) return std::nullopt;
   // One chain, and the import options only with --import.
-  const bool import_args = options.import_args.config_dir || !options.import_args.pick.empty();
-  if ((options.import && options.source) || (import_args && !options.import)) return std::nullopt;
+  if ((options.import && options.source) || (options.import_args.given() && !options.import)) return std::nullopt;
+  // The imported chain opens its own mic, so --mic could only name another.
+  if (options.import && !options.mic.empty() && !options.external) return std::nullopt;
   return options;
 }
 
@@ -446,7 +451,7 @@ void RunMic(runtime::ObsHost& host, const Options& options, const audio::AudioDe
 
 // Opens the mic: records it and the cable's recording side side by side and
 // measures how much later the cable has the same sound. Works the same
-// whether knOBS or OBS feeds the cable.
+// whether knobs or OBS feeds the cable.
 void MeasureMic(runtime::ObsHost& host, const Options& options, const audio::AudioDevice& mic,
                 const audio::AudioDevice& listen, const Chain& source) {
   const runtime::ObsApi& api = host.api();
@@ -531,7 +536,18 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::optional
     auto imported = ImportMic(api, *config, options.import_args);
     if (!imported) return Check(false, "import", imported.error());
     chain = {std::move(imported->source_json), imported->load_callbacks()};
-    if (options.output.empty()) output_query = config->audio.monitoring_device_id;
+    if (options.output.empty()) {
+      // OBS's default, which follows the default playback device: speakers,
+      // most likely, where the mic would feed back and clicks wouldn't
+      // reach --listen.
+      if (config->audio.monitoring_device_id == "default") {
+        return Check(false, "devices",
+                     "The OBS profile monitors to \"Default\", the default playback device, which is usually "
+                     "speakers. Pass --output with the virtual cable, or --output default if that's where it "
+                     "should go.");
+      }
+      output_query = config->audio.monitoring_device_id;
+    }
     if (options.mic.empty()) mic_query = imported->mic.device_id;
     if (!audio::FindDevice(mics, imported->mic.device_id, "recording device")) {
       Report(Outcome::kWarn, "mic", std::format("the mic's device ({}) isn't connected", imported->mic.device_id));
@@ -587,43 +603,23 @@ void PrintDevices(std::string_view heading, const std::vector<audio::AudioDevice
 
 int Run(const Options& options) {
   Print(std::format("{} live audio\n", kDisplayName));
-  auto install = options.obs_dir ? runtime::InspectObsInstall(*options.obs_dir) : runtime::FindObsInstall();
-  if (!install) {
-    Check(false, "find OBS", install.error());
-    return kExitFail;
-  }
-  runtime::HostOptions host_options;
-  host_options.obs_dir = install->root;
-  host_options.log_prefix = L"live ";
-  host_options.verbose = options.verbose;
-  std::optional<import::ActiveObsConfig> config;
-  if (options.import) {
-    auto found = FindObsConfig(options.import_args, *install);
-    if (!found) {
-      Check(false, "OBS settings", found.error());
-      return kExitFail;
-    }
-    config = std::move(*found);
-    UseProfileAudio(*config, host_options);
-  }
-  auto host = runtime::ObsHost::Start(host_options);
-  if (!host) {
-    Check(false, "start libobs", host.error());
-    return kExitFail;
-  }
-  Check(true, "start libobs",
-        std::format("OBS {}, {} Hz, {} channel(s), no video", (*host)->install().version.ToString(),
-                    host_options.samples_per_sec, get_audio_channels(host_options.speakers)));
+  auto started = StartTool({.obs_dir = options.obs_dir,
+                            .log_prefix = L"live ",
+                            .verbose = options.verbose,
+                            .import = options.import,
+                            .import_args = options.import_args});
+  if (const int* code = std::get_if<int>(&started)) return *code;
+  auto& [host, config] = std::get<StartedTool>(started);
 
-  const auto mics = audio::ListMicDevices((*host)->api());
-  const auto outputs = audio::ListMonitoringDevices((*host)->api());
+  const auto mics = audio::ListMicDevices(host->api());
+  const auto outputs = audio::ListMonitoringDevices(host->api());
   if (options.mode == Mode::kListDevices) {
     PrintDevices("Recording devices (--mic, --listen):", mics);
     PrintDevices("Playback devices (--output):", outputs);
   } else {
-    RunMode(**host, options, config, mics, outputs);
+    RunMode(*host, options, config, mics, outputs);
   }
-  return FinishRun(**host);
+  return FinishRun(*host);
 }
 
 }  // namespace

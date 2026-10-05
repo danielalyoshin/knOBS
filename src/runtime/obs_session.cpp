@@ -12,7 +12,7 @@
 namespace knobs::runtime {
 namespace {
 
-// Only affects module display strings, which knOBS doesn't show.
+// Only affects module display strings, which knobs doesn't show.
 constexpr char kLocale[] = "en-US";
 
 std::string_view DescribeModuleError(int code) {

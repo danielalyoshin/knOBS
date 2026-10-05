@@ -11,7 +11,9 @@ namespace knobs::runtime {
 Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
   auto dirs = GetAppDirs();
   if (!dirs) return Error{dirs.error()};
-  auto install = options.obs_dir ? InspectObsInstall(*options.obs_dir) : FindObsInstall();
+  auto install = options.install    ? Result<ObsInstall>(*options.install)
+                 : options.obs_dir ? InspectObsInstall(*options.obs_dir)
+                                   : FindObsInstall();
   if (!install) return Error{install.error()};
   auto copy = EnsureRuntimeCopy(*install, dirs->RuntimeBase(), false);
   if (!copy) return Error{copy.error()};

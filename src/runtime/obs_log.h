@@ -16,7 +16,7 @@
 
 namespace knobs::runtime {
 
-// Writes libobs's log (via base_set_log_handler) and knOBS's own lines to one
+// Writes libobs's log (via base_set_log_handler) and knobs's own lines to one
 // file. Thread-safe: libobs logs from many threads. The file stays readable
 // by other programs while open, and is appended to if it already exists.
 class ObsLog {

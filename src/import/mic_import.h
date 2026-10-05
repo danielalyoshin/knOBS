@@ -51,7 +51,7 @@ Result<size_t> PickMic(const std::vector<MicCandidate>& mics, std::string_view q
 std::string DescribeMic(const MicCandidate& mic, size_t number);
 
 struct ImportNote {
-  // A warning means knOBS's cable won't sound like OBS's; a note is
+  // A warning means knobs's cable won't sound like OBS's; a note is
   // information only.
   bool warning = false;
   std::string text;
@@ -74,7 +74,7 @@ class SceneCollection {
  public:
   // Reads `file`, or `file`.bak if `file` doesn't parse. OBS falls back the
   // same way, but also renames the backup over the broken file
-  // (obs_data_create_from_json_file_safe); knOBS only reads.
+  // (obs_data_create_from_json_file_safe); knobs only reads.
   static Result<std::unique_ptr<SceneCollection>> Read(const runtime::ObsApi& api,
                                                        const std::filesystem::path& file);
   ~SceneCollection();
@@ -84,6 +84,9 @@ class SceneCollection {
   // The file that was read: `file` or its backup.
   const std::filesystem::path& file() const { return file_; }
   bool from_backup() const { return from_backup_; }
+
+  // The name it saves, or "" (see FindSceneCollectionFile).
+  std::string name() const;
 
   // Every win-wasapi input: the global devices first, then "sources" in
   // order.
@@ -101,8 +104,5 @@ class SceneCollection {
   std::filesystem::path file_;
   bool from_backup_ = false;
 };
-
-// The collection's saved "name", or "" (see FindSceneCollectionFile).
-std::string ReadCollectionName(const runtime::ObsApi& api, const std::filesystem::path& file);
 
 }  // namespace knobs::import

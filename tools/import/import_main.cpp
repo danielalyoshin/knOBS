@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// knobs-import: imports the mic from OBS's settings the way knOBS will, and
+// knobs-import: imports the mic from OBS's settings the way knobs will, and
 // reports each step: the active profile and scene collection, the mics in
 // it, the pre-flight checks, and the chain libobs's loader builds from it.
 //
@@ -16,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 
 #include "app_info.h"
 #include "audio/audio_devices.h"
@@ -23,8 +24,6 @@
 #include "common/console.h"
 #include "common/obs_import.h"
 #include "common/push_source.h"
-#include "runtime/obs_host.h"
-#include "runtime/obs_install.h"
 #include "util/win_strings.h"
 
 namespace {
@@ -108,50 +107,30 @@ void ReportDevices(const runtime::ObsApi& api, const import::ImportedMic& import
 
 int Run(const Options& options) {
   Print(std::format("{} import\n", kDisplayName));
-  if (!options.obs_dir && runtime::ObsInstallCandidates().empty()) {
-    Report(Outcome::kNote, "find OBS", "OBS isn't installed");
-    Print("SKIP (OBS isn't installed)\n");
-    return kExitSkip;
-  }
-  auto install = options.obs_dir ? runtime::InspectObsInstall(*options.obs_dir) : runtime::FindObsInstall();
-  if (!install) {
-    Check(false, "find OBS", install.error());
-    return kExitFail;
-  }
-  auto config = FindObsConfig(options.import_args, *install);
-  if (!config) {
-    Check(false, "OBS settings", config.error());
-    return kExitFail;
-  }
-
-  runtime::HostOptions host_options;
-  host_options.obs_dir = install->root;
-  host_options.log_prefix = L"import ";
-  host_options.verbose = options.verbose;
-  UseProfileAudio(*config, host_options);
-  auto host = runtime::ObsHost::Start(host_options);
-  if (!host) {
-    Check(false, "start libobs", host.error());
-    return kExitFail;
-  }
-  const runtime::ObsApi& api = (*host)->api();
-  Check(true, "start libobs", std::format("OBS {}, no video, no audio devices", install->version.ToString()));
+  auto started = StartTool({.obs_dir = options.obs_dir,
+                            .log_prefix = L"import ",
+                            .verbose = options.verbose,
+                            .import = true,
+                            .import_args = options.import_args});
+  if (const int* code = std::get_if<int>(&started)) return *code;
+  auto& [host, config] = std::get<StartedTool>(started);
+  const runtime::ObsApi& api = host->api();
 
   auto imported = ImportMic(api, *config, options.import_args);
   if (!imported) {
     Check(false, "import", imported.error());
-    return FinishRun(**host);
+    return FinishRun(*host);
   }
   RegisterPushSource(api);
   auto source = audio::LoadSourceJson(
       api, imported->source_json, {.type_id = kPushSourceId, .load_callbacks = imported->load_callbacks()});
   if (!source) {
     Check(false, "load", source.error());
-    return FinishRun(**host);
+    return FinishRun(*host);
   }
   ReportChain(audio::DescribeChain(api, *source));
   api.obs_source_release(*source);
-  (*host)->session().DrainDestroyQueue();
+  host->session().DrainDestroyQueue();
   Check(true, "load",
         std::format("libobs loaded the chain{}; {} warning(s)",
                     imported->load_callbacks() ? " and ran its load callbacks" : "", imported->warning_count()));
@@ -164,7 +143,7 @@ int Run(const Options& options) {
     Check(static_cast<bool>(out), "save",
           out ? ToUtf8(*options.save) : std::format("couldn't write {}", ToUtf8(*options.save)));
   }
-  return FinishRun(**host);
+  return FinishRun(*host);
 }
 
 }  // namespace

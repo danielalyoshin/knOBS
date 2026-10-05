@@ -8,9 +8,7 @@
 
 #include <windows.h>
 
-#include <algorithm>
 #include <chrono>
-#include <cmath>
 #include <cstdlib>
 #include <cwchar>
 #include <filesystem>
@@ -18,6 +16,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include "app_info.h"
@@ -27,11 +26,9 @@
 #include "common/offline_chain.h"
 #include "common/push_source.h"
 #include "common/sha256.h"
-#include "common/text_file.h"
-#include "common/wav.h"
 #include "common/test_signal.h"
-#include "runtime/obs_host.h"
-#include "runtime/obs_install.h"
+#include "common/wav.h"
+#include "util/text_file.h"
 #include "util/win_strings.h"
 
 namespace {
@@ -167,46 +164,22 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
     ++i;
   }
   // One chain, and the import options only with --import.
-  const bool import_args = options.import_args.config_dir || !options.import_args.pick.empty();
-  if ((options.import && options.source) || (import_args && !options.import)) return std::nullopt;
+  if ((options.import && options.source) || (options.import_args.given() && !options.import)) return std::nullopt;
   return options;
-}
-
-std::string Level(const std::vector<float>& samples) {
-  float peak = 0;
-  for (const float x : samples) peak = std::max(peak, std::fabs(x));
-  return FormatPeak(peak);
 }
 
 int Run(const Options& options) {
   Print(std::format("{} offline harness\n", kDisplayName));
-
-  // libobs. An import decides its audio format, so that comes first.
-  if (!options.obs_dir && runtime::ObsInstallCandidates().empty()) {
-    Report(Outcome::kNote, "find OBS", "OBS isn't installed");
-    Print("SKIP (OBS isn't installed)\n");
-    return kExitSkip;
-  }
-  auto install = options.obs_dir ? runtime::InspectObsInstall(*options.obs_dir) : runtime::FindObsInstall();
-  if (!install) {
-    Check(false, "find OBS", install.error());
-    return kExitFail;
-  }
-  runtime::HostOptions host_options;
-  host_options.obs_dir = install->root;
-  host_options.log_prefix = L"harness ";
-  host_options.verbose = options.verbose;
-  std::optional<import::ActiveObsConfig> config;
-  if (options.import) {
-    auto found = FindObsConfig(options.import_args, *install);
-    if (!found) {
-      Check(false, "OBS settings", found.error());
-      return kExitFail;
-    }
-    config = std::move(*found);
-    UseProfileAudio(*config, host_options);
-  }
-  const uint32_t rate = host_options.samples_per_sec;
+  // An import decides libobs's audio format, and so the input's.
+  auto started = StartTool({.obs_dir = options.obs_dir,
+                            .log_prefix = L"harness ",
+                            .verbose = options.verbose,
+                            .import = options.import,
+                            .import_args = options.import_args});
+  if (const int* code = std::get_if<int>(&started)) return *code;
+  auto& [host, config] = std::get<StartedTool>(started);
+  const runtime::ObsApi& api = host->api();
+  const uint32_t rate = host->session().options().samples_per_sec;
 
   // Input.
   FloatAudio input;
@@ -214,13 +187,13 @@ int Run(const Options& options) {
     auto wav = ReadFloatWav(*options.in);
     if (!wav) {
       Check(false, "input", wav.error());
-      return kExitFail;
+      return FinishRun(*host);
     }
     if (wav->sample_rate != rate || wav->channels > 2) {
       Check(false, "input",
             std::format("{} is {} Hz with {} channels; the harness takes {} Hz mono or stereo here.",
                         ToUtf8(*options.in), wav->sample_rate, wav->channels, rate));
-      return kExitFail;
+      return FinishRun(*host);
     }
     input = std::move(*wav);
   } else if (rate != kSampleRate) {
@@ -228,28 +201,18 @@ int Run(const Options& options) {
           std::format("The built-in test signal is {} Hz, and the OBS profile runs at {} Hz. Pass --in with a "
                       "{} Hz file.",
                       kSampleRate, rate, rate));
-    return kExitFail;
+    return FinishRun(*host);
   } else {
     input = MakeTestSignal();
   }
   Report(Outcome::kNote, "input",
          std::format("{}: {:.2f} s, {} channel(s), peak {}",
                      options.in ? ToUtf8(*options.in) : std::string("built-in test signal"),
-                     static_cast<double>(input.frames()) / rate, input.channels, Level(input.samples)));
+                     static_cast<double>(input.frames()) / rate, input.channels, FormatPeakOf(input.samples)));
   if (options.save_input) {
     const auto saved = WriteFloatWav(*options.save_input, input);
     Check(saved.ok(), "save input", saved.ok() ? ToUtf8(*options.save_input) : saved.error());
   }
-
-  auto host = runtime::ObsHost::Start(host_options);
-  if (!host) {
-    Check(false, "start libobs", host.error());
-    return kExitFail;
-  }
-  const runtime::ObsApi& api = (*host)->api();
-  Check(true, "start libobs",
-        std::format("OBS {}, {} Hz, {} channel(s), no video, no audio devices", install->version.ToString(),
-                    rate, get_audio_channels(host_options.speakers)));
   RegisterPushSource(api);
 
   // Chain.
@@ -259,7 +222,7 @@ int Run(const Options& options) {
     auto imported = ImportMic(api, *config, options.import_args);
     if (!imported) {
       Check(false, "import", imported.error());
-      return FinishRun(**host);
+      return FinishRun(*host);
     }
     json = std::move(imported->source_json);
     load_callbacks = imported->load_callbacks();
@@ -267,7 +230,7 @@ int Run(const Options& options) {
     auto text = ReadText(*options.source);
     if (!text) {
       Check(false, "chain", text.error());
-      return FinishRun(**host);
+      return FinishRun(*host);
     }
     json = std::move(*text);
   } else {
@@ -280,10 +243,10 @@ int Run(const Options& options) {
   std::string first_hash;
   bool run_failed = false;
   for (int run = 1; run <= options.runs && !run_failed; ++run) {
-    const auto started = std::chrono::steady_clock::now();
-    auto result = RunChainOffline(api, (*host)->session(), json, load_callbacks, input, options.chunk,
+    const auto began = std::chrono::steady_clock::now();
+    auto result = RunChainOffline(api, host->session(), json, load_callbacks, input, options.chunk,
                                   kTailSeconds * rate);
-    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - began).count();
     if (!result) {
       Check(false, "load chain", result.error());
       break;
@@ -307,7 +270,7 @@ int Run(const Options& options) {
       run_failed = output.samples.empty();
       Check(!run_failed, step,
             std::format("{:.2f} s out in {:.2f} s ({:.0f}x real time), peak {}, sha256 {}", out_seconds, seconds,
-                        out_seconds / seconds, Level(output.samples), hash));
+                        out_seconds / seconds, FormatPeakOf(output.samples), hash));
       first = std::move(output);
       first_hash = hash;
     } else {
@@ -323,7 +286,7 @@ int Run(const Options& options) {
     const auto written = WriteFloatWav(*options.out, *first);
     Check(written.ok(), "output", written.ok() ? ToUtf8(*options.out) : written.error());
   }
-  return FinishRun(**host);
+  return FinishRun(*host);
 }
 
 }  // namespace

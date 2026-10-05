@@ -6,9 +6,9 @@
 
 #include "util/result.h"
 
-namespace knobs::tools {
+namespace knobs {
 
-// The whole file, as is.
+// The whole file, as is. An error if it can't be opened or read.
 Result<std::string> ReadText(const std::filesystem::path& file);
 
-}  // namespace knobs::tools
+}  // namespace knobs

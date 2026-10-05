@@ -5,7 +5,7 @@
 #include <string_view>
 #include <vector>
 
-// Declarations only, from the vendored headers (third_party/libobs). knOBS
+// Declarations only, from the vendored headers (third_party/libobs). knobs
 // never links obs.lib: calling a libobs function directly instead of through
 // ObsApi fails at link time, which is intended.
 #include <obs.h>
@@ -13,7 +13,7 @@
 
 namespace knobs::runtime {
 
-// Every libobs export knOBS calls. Add entries here as milestones need them;
+// Every libobs export knobs calls. Add entries here as milestones need them;
 // the types come from the vendored headers via decltype.
 #define KNOBS_OBS_API(X)                      \
   /* Version */                               \

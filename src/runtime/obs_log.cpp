@@ -16,7 +16,7 @@ Result<std::unique_ptr<ObsLog>> ObsLog::Open(const std::filesystem::path& file) 
   std::filesystem::create_directories(file.parent_path(), ec);
   std::unique_ptr<ObsLog> log(new ObsLog());
   log->path_ = file;
-  // _SH_DENYWR lets other programs read the log while knOBS runs; the
+  // _SH_DENYWR lets other programs read the log while knobs runs; the
   // _wfopen_s default denies them all access.
   log->file_ = _wfsopen(file.c_str(), L"ab", _SH_DENYWR);
   if (!log->file_) {

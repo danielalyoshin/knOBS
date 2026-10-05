@@ -38,7 +38,7 @@ std::string Describe(const std::error_code& ec) {
 }
 
 // The binaries the file set is built from. Recorded in the manifest so a
-// knOBS that loads more modules doesn't reuse a copy made without them.
+// knobs that loads more modules doesn't reuse a copy made without them.
 std::string RootsLine() {
   std::string roots(kGraphicsModule);
   for (std::string_view module : kObsModules) roots += std::format(" {}", module);
@@ -61,7 +61,7 @@ bool FlushToDisk(const fs::path& file) {
 }
 
 // Serializes runtime copies across processes in this logon session, so two
-// knOBS instances starting together can't clobber each other's staging folder.
+// knobs instances starting together can't clobber each other's staging folder.
 class CopyLock {
  public:
   CopyLock() {
@@ -181,7 +181,7 @@ Status WriteManifest(const fs::path& copy_root, const ObsInstall& install,
 }
 
 // Deletes <version>.old-* folders left by earlier swaps. Ones still in use
-// by a running knOBS stay until a later copy.
+// by a running knobs stay until a later copy.
 void RemoveRetiredCopies(const fs::path& runtime_base, const std::string& version) {
   const std::string prefix = AsciiLower(version + ".old-");
   std::error_code ec;
@@ -299,7 +299,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     if (ec) {
       return Error{std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(to), Describe(ec))};
     }
-    // The copy is knOBS's own; a read-only attribute carried over from the
+    // The copy is knobs's own; a read-only attribute carried over from the
     // install would block flushing it now and replacing it later.
     const DWORD attributes = GetFileAttributesW(to.c_str());
     if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY)) {
@@ -314,7 +314,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   }
 
   // Move the old copy aside rather than deleting it: the rename fails as a
-  // whole while a running knOBS has it loaded, instead of half-deleting it.
+  // whole while a running knobs has it loaded, instead of half-deleting it.
   RemoveRetiredCopies(runtime_base, version);
   const bool replacing = fs::exists(target, ec);
   const fs::path retired =

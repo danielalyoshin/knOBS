@@ -20,7 +20,7 @@ struct RuntimeFileSet {
   uint64_t total_bytes = 0;
 };
 
-// Works out what knOBS needs from an OBS install:
+// Works out what knobs needs from an OBS install:
 //  - obs.dll, the graphics module and the two modules, plus every DLL they
 //    import, directly or indirectly, that the install ships, and the PDBs
 //    next to them;
@@ -39,10 +39,10 @@ struct RuntimeCopy {
 // Makes sure <runtime_base>\<version> holds a complete copy of the install's
 // runtime files. Refuses unsupported OBS versions before copying anything.
 // Reuses the existing copy unless `force` is set or the copy no longer matches
-// the install (a file changed, or knOBS now needs different modules).
+// the install (a file changed, or knobs now needs different modules).
 // Otherwise copies into a staging folder, flushes it to disk and swaps it in,
 // so an interrupted copy is never used. Copies are serialized across
-// processes. Replacing a copy fails while a running knOBS has it loaded.
+// processes. Replacing a copy fails while a running knobs has it loaded.
 Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install,
                                       const std::filesystem::path& runtime_base, bool force);
 

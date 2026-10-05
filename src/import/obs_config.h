@@ -12,7 +12,7 @@
 
 // Finds OBS's active profile and scene collection the way OBS 32 does
 // (frontend/OBSApp.cpp, OBSBasic_Profiles.cpp, OBSBasic_SceneCollections.cpp).
-// Only reads: OBS's settings are read-only to knOBS.
+// Only reads: OBS's settings are read-only to knobs.
 namespace knobs::import {
 
 // The folder OBS keeps its settings in, the one holding obs-studio\.
@@ -26,6 +26,10 @@ struct ObsConfigRoot {
 // --portable flag also turns portable mode on, which can't be seen from
 // outside; pass that folder explicitly instead.
 Result<ObsConfigRoot> FindObsConfigRoot(const std::filesystem::path& install_root);
+
+// A settings folder given directly. It's portable if it's the config\ folder
+// of a portable install, which ignores global.ini's [Locations].
+ObsConfigRoot ObsConfigRootAt(const std::filesystem::path& folder);
 
 // A profile's [Audio] settings in basic.ini, with the defaults OBS uses for
 // missing keys (OBSBasic.cpp, InitBasicConfigDefaults).

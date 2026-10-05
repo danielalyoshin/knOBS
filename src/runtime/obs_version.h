@@ -35,7 +35,7 @@ bool IsSupportedObsVersion(const ObsVersion& version);
 // For messages, e.g. "OBS Studio 32.2 or a later 32.x release".
 std::string DescribeSupportedObsVersions();
 
-// "OBS <version_text> isn't supported. knOBS supports ..."
+// "OBS <version_text> isn't supported. knobs supports ..."
 std::string UnsupportedObsMessage(std::string_view version_text);
 
 }  // namespace knobs::runtime

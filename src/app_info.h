@@ -3,10 +3,11 @@
 
 #include <string_view>
 
-// The display name may become "Knobs" before release (see plan.md), so this
-// is its only definition. It also names knOBS's %AppData% and %LocalAppData%
-// folders; Windows paths are case-insensitive, so a rename keeps them.
-#define KNOBS_DISPLAY_NAME "knOBS"
+// The display name: "knobs", all lowercase (it was "knOBS" until 2026-10-05).
+// This is its only definition, in case it changes again (see plan.md). It also
+// names knobs's %AppData% and %LocalAppData% folders; Windows paths are
+// case-insensitive, so a rename that only changes case keeps them.
+#define KNOBS_DISPLAY_NAME "knobs"
 
 namespace knobs {
 

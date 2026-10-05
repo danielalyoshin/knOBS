@@ -5,13 +5,13 @@
 #include <filesystem>
 #include <string_view>
 
-// Folder layout shared by an OBS install and knOBS's runtime copy of it. The
+// Folder layout shared by an OBS install and knobs's runtime copy of it. The
 // copy mirrors the install because libobs finds files relative to bin\64bit:
 // "../../data/libobs/" for its own data (obs-windows.c) and "../../obs-plugins"
 // for modules.
 namespace knobs::runtime {
 
-// The only modules knOBS loads. No obs-vst in v1.
+// The only modules knobs loads. No obs-vst in v1.
 inline constexpr std::array<std::string_view, 2> kObsModules = {"win-wasapi", "obs-filters"};
 
 // Graphics module for the dummy-video fallback (see VideoMode::kDummy).
