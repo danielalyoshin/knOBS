@@ -199,6 +199,31 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
   - Mono, balance and volume show in the chain summary libobs reports after loading. The tools also warn if the mic's device or the monitoring device isn't connected.
 - **Load:** libobs serializes the pre-flighted object, and `obs_load_private_source` loads it, followed by `obs_source_load2` for a mic from `sources` (§4 step 6).
 
+### Tray and first run (M3 design)
+
+Shaped on 2026-10-05, not built yet. The UI uses Windows' own controls. The brand shows only in the knob icon and the line saying knobs isn't affiliated with the OBS Project.
+
+- **One status format.** Status is the mic's chain, named as OBS shows it, enabled filters only: `Mic/Aux › 3-Band EQ › Expander › Compressor › Limiter › CABLE In 16ch`. The menu and tooltip use the short form `Mic/Aux › 4 filters › CABLE In 16ch`. The first run and notifications use the same format.
+- **First run:** one `TaskDialogIndirect` window that changes pages with `TDM_NAVIGATE_PAGE`. It stays light in dark mode, which is fine for a window seen once.
+  - The first page offers two command links, "I set up my mic in OBS" and "I'm new to OBS". Each note says what knobs found ("Found Mic/Aux with 4 filters.", "Mic/Aux has no filters yet.", "OBS Studio isn't installed."), and the one that fits is the default.
+  - The first door shows only the pages it needs. Which mic, when there are several (a `default` device reads "Default communications device (…)", M1 findings). Which cable, when the profile monitors to `default` or to a device that isn't a cable; with no cable installed, it links to VB-Cable and moves on by itself when one appears. Warnings, for pre-flight warnings and notes that change what to expect, such as push-to-talk.
+  - The second door lists five steps in OBS: get OBS 32.2 if it's missing, open Filters on Mic/Aux, add Noise Suppression, Noise Gate, Compressor and Limiter in that order, adjust each by ear from OBS's defaults, and close OBS. It has an Open OBS button and links to the M4 setup guide. knobs suggests no settings. When OBS closes, knobs re-imports and continues with the first door's pages if the mic now has filters.
+  - The last page shows the chain and says to choose the cable's recording side (CABLE Output) as the mic in other apps. It says where the tray icon is, since Windows 11 puts new icons under ^. A "Start with Windows" checkbox is checked by default.
+  - Closing the window early leaves knobs in the tray, needing setup. An unfinished first run resumes where it stopped.
+- **Tray menu:** a native menu (`TrackPopupMenuEx`), the same on left and right click. A status line, Pause/Resume, Mic ▸, Cable ▸, Re-import from OBS, Pause while OBS is open, Start with Windows, Setup…, Open log folder, About, Quit.
+  - The status line can't be clicked. When something needs the user, the next item is the fix, in bold: "Finish setup…", "Choose a cable…", "Find OBS…".
+  - Cable ▸ starts with "Same as OBS (…)" when the profile monitors to a cable. Any other pick is knobs's own setting and survives re-imports. Detected cables come first, and other playback devices go under "Other devices".
+  - Dark menus come from uxtheme's `SetPreferredAppMode`, resolved by ordinal. Without it, the menu stays light.
+- **Following OBS:** knobs re-imports when it starts and each time `obs64.exe` exits, and says so only when the mic or the chain changed. An OBS update to a supported version refreshes the runtime copy and restarts knobs. An unsupported one stops knobs, with a notification.
+- **Tray icon:** a glyph of its own, not `knobs.ico`: the knob without its tile, filling the square, fitted to the pixel grid at 16, 20, 24 and 32 px, with a light rim on a dark taskbar. Running shows the knob alone, paused adds a pause badge, and needing the user adds an amber "!" badge. The knob itself is never recolored. The tooltip repeats the status line.
+- **Notifications** are `Shell_NotifyIcon` balloons: what happened, then what knobs does or what to do. Clicking one opens the fix. They cover a mic missing for 5 s (so a power cycle stays quiet), a missing cable, a chain changed in OBS, a filter knobs can't run, and an unsupported OBS. Nothing shows on a cold boot, or when OBS opens or closes without changes.
+- **Open:**
+  - Pausing while OBS is open leaves the cable silent if OBS doesn't monitor the mic, which is likely once knobs does that job. Pausing only when OBS's saved settings monitor the mic to the same cable avoids that, but saved settings can lag behind what OBS is doing.
+  - Cable recording sides: CABLE Input and CABLE In 16ch go to CABLE Output, CABLE-A Input to CABLE-A Output, VoiceMeeter Input to VoiceMeeter Output. For anything else, say "the recording side of …".
+  - A re-import that changes the sample rate or channel layout may need `obs_reset_audio` or a restart.
+  - Check the OBS names in the second door's steps against 32.2.2's locale files.
+  - Open OBS has to start `obs64.exe` with its own `bin\64bit` as the working directory.
+
 ## 5. Milestones
 
 **M0 — Runtime bootstrap** (done 2026-09-30 against OBS 32.2.2; see M0 findings in §4)
@@ -225,14 +250,14 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 - [ ] Support OBS 33.0 once it's released (OBS 33.0 notes in §4). Needed here because the comparison runs against the installed OBS, and knobs refuses 33.x until then. Still in beta on 2026-10-05 (33.0.0-beta6). The load fix is in.
 
 **M3 — Tray app**
-- [ ] Win32 tray: start/stop, device + cable pickers, re-import, autostart toggle, log access
+- [ ] Win32 tray: start/stop, device + cable pickers, re-import, autostart toggle, log access (Tray and first run in §4)
 - [ ] OBS folder picker when auto-detection fails; remember the choice in `%AppData%\knobs`
-- [ ] OBS coexistence: watch for `obs64.exe`; auto-pause while it runs, resume when it exits (toggleable)
+- [ ] OBS coexistence: watch for `obs64.exe`; auto-pause while it runs, resume when it exits (toggleable), and re-import when it exits. Decide whether to pause when OBS doesn't monitor the mic (Tray and first run in §4).
 - [ ] Detect installed-OBS version change on startup → prompt re-import / runtime refresh (restart the process to load the new copy; prune old copies)
 - [ ] Device disconnect/reconnect. win-wasapi's reconnect thread only runs after `activate`, which needs the video tick (M0 findings). Choose between the dummy canvas and re-creating the source via `obs_load_source()`; either way, knobs surfaces state rather than reimplementing capture.
 - [ ] Error surfacing via tray notifications
-- [ ] First run for people new to OBS: explain that knobs runs the mic filters set up in OBS, and point to how to build a chain there. The M4 setup guide covers it too.
-- [ ] Exe and tray icon from `assets/knobs.ico`. At 16 px the knob reads as a dark puck, so decide whether the tray needs a simpler glyph, and how running, paused and error look.
+- [ ] First run: one door for a mic already set up in OBS, one for people new to OBS (Tray and first run in §4). The M4 setup guide covers it too.
+- [ ] Exe icon from `assets/knobs.ico`. The tray gets a glyph of its own, with badges for paused and needing the user (Tray and first run in §4). It still needs drawing.
 - [ ] Long-run latency: run the mic into the cable for hours, alongside OBS for comparison, and watch for latency steps and clock drift (M1 findings). If latency creeps up, restarting the monitor resets it. Decide whether knobs should do that, for example while the mic is silent.
 
 **M4 — Ship**
@@ -283,6 +308,11 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 8 (2026-10-05)
+
+- Shaped the M3 tray menu and first run (Tray and first run in §4): a native menu, a TaskDialog first run with one door for OBS users and one for people new to OBS, a tray glyph of its own with state badges, and re-import each time OBS exits.
+- New open question: pausing while OBS is open silences the cable when OBS doesn't monitor the mic.
 
 ### Revision notes — Rev 7 (2026-10-05)
 

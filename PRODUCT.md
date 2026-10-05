@@ -39,10 +39,8 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 - No custom DSP and no "improvements". No filter editing in v1, since users tune in OBS. No VST filters in v1. Windows only in v1.
 - Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
 - Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device.
-- Open:
-  - How the first run explains OBS filters and building a chain to people new to OBS (M3).
-  - The tray icon: at 16 px the knob reads as a dark puck. Whether the tray needs a simpler glyph, and how running, paused and error states look (M3).
-  - An installer or a portable zip (M4).
+- The tray menu, first run and tray icon are designed in plan.md (Tray and first run, §4).
+- Open: an installer or a portable zip (M4).
 
 ## Brand Commitments
 
