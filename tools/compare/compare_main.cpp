@@ -333,7 +333,8 @@ int Run(const Options& options) {
   // Source drops the file's last few milliseconds as it stops, and its mix
   // fills zeros in where knOBS's filters still ring at around -240 dBFS. The
   // offline run also pads its last packet with silence.
-  ours.samples.resize(std::min(ours.samples.size(), (padded.frames() - rate) * ours.channels));
+  const size_t compared_frames = padded.frames() > rate ? padded.frames() - rate : 0;
+  ours.samples.resize(std::min(ours.samples.size(), compared_frames * ours.channels));
 
   // OBS's side.
   FloatAudio theirs;
