@@ -4,7 +4,7 @@
 
 knOBS is a Windows tray app in the making. It runs the microphone filter chain you tuned in OBS Studio (noise suppression, gate, expander, compressor, limiter) and sends the result to a virtual audio cable. Discord, Zoom and games get the same processed mic while OBS stays closed.
 
-> **Status: early development, not usable yet.** There's no tray app. Loading libobs and the live audio path work, and the dev tools below exercise them. Importing your OBS settings is next. [plan.md](plan.md) has the design and milestones.
+> **Status: early development, not usable yet.** There's no tray app. Loading libobs, importing your mic from OBS and the live audio path work, and the dev tools below exercise them. For the same input, knOBS's output is bit-identical to OBS's. The tray app is next. [plan.md](plan.md) has the design and milestones.
 
 ## How it works
 
@@ -35,6 +35,7 @@ The build puts these in `build\x64\<config>\`. Each one takes `--help`.
 - `knobs-smoke` checks that libobs loads from the private copy and shuts down cleanly.
 - `knobs-import` imports the mic from your active OBS profile and scene collection, without changing them, and shows what it found: the mics, warnings about anything knOBS can't reproduce, and the filter chain. It opens no audio devices.
 - `knobs-harness` pushes a WAV through a filter chain, such as your imported one (`--import`), offline and checks that the output is bit-identical across runs. It opens no audio devices.
+- `knobs-compare` runs the same audio through your imported chain in knOBS and in OBS itself, and measures the difference. OBS runs from a private copy in `%LocalAppData%\knOBS\compare`, with settings of its own, minimized to the tray.
 - `knobs-live` runs the live path into a virtual cable and measures its latency. Only `--run` and `--measure-mic` open the microphone.
 
 ## License

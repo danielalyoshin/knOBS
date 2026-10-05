@@ -29,7 +29,7 @@
 #include "common/sha256.h"
 #include "common/text_file.h"
 #include "common/wav.h"
-#include "harness/test_signal.h"
+#include "common/test_signal.h"
 #include "runtime/obs_host.h"
 #include "runtime/obs_install.h"
 #include "util/win_strings.h"

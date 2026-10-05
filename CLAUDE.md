@@ -2,7 +2,7 @@
 
 Windows tray app that runs the user's OBS mic filter chain through their installed libobs and sends the result to a virtual audio cable, with no OBS process. Design, milestones and rationale are in [plan.md](plan.md). Read it before non-trivial work. When a decision changes, update it and tick milestone boxes as work lands.
 
-Status: M0 (runtime bootstrap) and M1 (live path and offline harness) are done against OBS 32.2.2. The mic-to-cable latency matches OBS. M2 (config import and the comparison against OBS) is next.
+Status: M0 (runtime bootstrap) and M1 (live path and offline harness) are done against OBS 32.2.2, and the mic-to-cable latency matches OBS. In M2, config import and the comparison against OBS are done: knOBS's output is bit-identical to OBS's. The ABX item awaits a decision (plan.md, M2), and 33.0 support waits for its release. M3 (tray app) is next.
 
 ## Stack
 - C++20, CMake, MSVC (VS 2022 or newer; the preset uses the newest installed Visual Studio), x64 only, static CRT.
@@ -22,6 +22,7 @@ The dev tools in `build\x64\<config>\` each take `--help`:
 - `knobs-smoke`: the M0 bootstrap check. Options include `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`).
 - `knobs-import`: imports the mic from OBS's active profile and scene collection and reports each step: settings found, mics, pre-flight warnings, the chain libobs loads. `--obs-config` points it at another OBS settings folder, `--pick` chooses among several mics, `--save` writes the source object. It opens no audio devices.
 - `knobs-harness`: pushes a WAV (or a built-in test signal) through a filter chain offline and checks that runs are bit-identical. `--import` uses the imported mic's chain; `--source <json>` takes an OBS source object; `--out` writes the result. It opens no audio devices.
+- `knobs-compare`: runs the same input through the imported chain in knOBS and in OBS itself, and measures the difference. OBS runs from a portable copy of the install in `%LocalAppData%\knOBS\compare`, minimized to the tray, with settings of its own. It opens no audio device and leaves `%AppData%\obs-studio` alone. `--obs-wav` compares with an existing OBS recording instead.
 - `knobs-live`: the live path into a virtual cable. `--import` runs the imported mic, monitored to the profile's monitoring device. `--list-devices`, `--measure-output` and `--measure-cable` don't use the mic. `--measure-output` and `--measure-cable` play test clicks into VB-Cable and refuse to run while another app is using the cable. `--run` and `--measure-mic` open the mic.
 
 Don't open the mic without the user's go-ahead.
@@ -31,8 +32,8 @@ Don't open the mic without the user's go-ahead.
 - `src/import/`: reading OBS's settings (an INI reader that matches libobs's parser, the active profile and scene collection), finding the mics in a collection, and the pre-flight checks.
 - `src/audio/`: the live path. Device lists, and `LiveChain`, which loads a source through OBS's loader and monitors it.
 - `src/util/`: `Result`, UTF-8, JSON and Win32 helpers, knOBS's app folders.
-- `tools/common/`: code shared by the dev tools (console output, WAV and text files, the push source and offline runs, the tools' import steps, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
-- `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/live/`: the dev tools above. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`.
+- `tools/common/`: code shared by the dev tools (console output, WAV and text files, the push source and offline runs, the test signal, the tools' import steps, aligning and diffing audio, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
+- `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/compare/`, `tools/live/`: the dev tools above. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`.
 - `tests/`: unit tests, which don't need OBS, and the import test, which runs `knobs-import` on the made-up OBS settings in `tests/fixtures/obs-config`.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
 

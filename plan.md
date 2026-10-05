@@ -143,6 +143,25 @@ Measured with `knobs-harness` and `knobs-live` (`tools/`). The mic runs (2026-10
 - **Packet size matters only at rounding level.** Pushing 256-, 441- or 1024-frame packets instead of 480 changes the full chain's output by at most 2e-5. The residual is 121–130 dB below the signal, with no time shift, and about 98% of frames are identical. OBS's Media Source delivers different packet sizes from WASAPI, so the M2 comparison should expect a residual around −120 dB, not zero.
 - **win-wasapi's "default" input is the default communications device** (`InitDevice` asks for `eCommunications`), not the default recording device. The M3 mic picker should say so.
 
+### M2 findings (OBS 32.2.2)
+
+Measured with `knobs-compare` (`tools/compare`) on 2026-10-05. It runs the same input through the imported chain twice: in knOBS, offline, as `knobs-harness` does, and in OBS itself. The OBS side is a scripted run of a private copy of the install in portable mode (`%LocalAppData%\knOBS\compare\obs-<version>`, about 125 MB without the browser source and debug symbols):
+- a Media Source carrying the mic's filters and source settings, loaded as the Mic/Aux device;
+- Custom Output (FFmpeg) recording track 1 to a 32-bit float WAV;
+- the Output Timer stopping the recording.
+
+OBS starts minimized to the tray. No audio device is opened, and the user's OBS settings aren't touched.
+
+- **knOBS's output is bit-identical to OBS's** when both filter the same packets. That held on the built-in test signal and on synthetic speech (Windows TTS over a −60 dBFS noise floor), for two chains:
+  - the real collection's mic: 3-band EQ, expander, compressor and limiter, with Mono on;
+  - every obs-filters audio filter in one chain, RNNoise and Speex included.
+
+  Seven OBS recordings, all bit-identical.
+- **Packet size is the only difference.** OBS's Media Source plays a WAV in 4096-frame packets. FFmpeg's PCM demuxer aims for 10 packets a second and rounds down to a power of two. `knobs-compare` uses that size by default. With knOBS in 480-frame packets (10 ms, WASAPI's), the full chain's residual is 120.4 dB below the signal (peak −97 dBFS), as M1 predicted. The real chain's peaks at −240 dBFS, in filter tails. Live, OBS and knOBS both get win-wasapi's packets from the same code, so like-for-like is the comparison that matters.
+- **The end of the file isn't compared.** OBS's Media Source drops the file's last ~18 ms as it stops, and the mix fills in zeros where knOBS's filters still ring at about −240 dBFS. The comparison stops one second before the end of the file, inside the trailing silence.
+- **Threshold:** a run passes if its residual is at least 100 dB below the signal (RMS), 20 dB under the packet-size effect. Bit-identical runs are reported as such.
+- **A blind ABX can't tell these renders apart.** Identical bits can only score at chance. A live ABX would need OBS and knOBS processing the same performance at the same time into two separate cables, and VB-Cable's inputs all feed one output. What's left to check is real voice, which only differs from the test signals in content: a `knobs-compare --in` run on an unprocessed recording of the mic, which needs someone at the mic.
+
 **Why `obs_load_source()`:** it's the same code path OBS uses to load the collection, and the scene JSON was written by the same OBS version whose loader reads it. That removes a hand-written settings replayer as a source of drift. Manual replay (`obs_source_create` + `obs_source_filter_add` + setters) is the fallback if it misbehaves.
 
 ### OBS 33.0 notes (checked against 33.0.0-beta6)
@@ -199,9 +218,9 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 - [x] Enumerate candidate mic sources (`sources[]` + `AuxAudioDevice*` keys); picker if multiple. `SceneCollection::Mics` and `PickMic` (`src/import/mic_import.h`); the tools take `--pick`, and the tray's picker is M3.
 - [x] Pre-flight checks (VST strip, unknown IDs, compressor sidechain, push-to-talk/mute) with warnings. `SceneCollection::Import`. CTest runs `knobs-import` on a made-up collection (`tests/fixtures/obs-config`) that sets off every check.
 - [x] Load via `obs_load_source()`; apply post-load fixups. Call `obs_source_load2` for a mic from `sources`, not for a global audio device, as OBS does (§4 step 6). `--import` in `knobs-harness` and `knobs-live`. The real collection's mic (Mic/Aux: EQ, expander, compressor, limiter, Mono on) loads with nothing to warn about, runs bit-identically in the harness, and reaches CABLE In 16ch, the profile's monitoring device, 82 ms after each push.
-- [ ] Comparison vs OBS: same WAV (leading ~2 s of silence so envelopes settle identically) through an OBS Media Source with the chain pasted on and Mono/balance matched → record 32-bit float PCM. Run the same file through the harness with the imported chain. Align via cross-correlation; residual must fall below a set threshold (expect around −120 dB rather than zero, since packet sizes differ; see M1 findings. Investigate anything audible).
-- [ ] Blind ABX on real voice: OBS vs knOBS
-- [ ] Support OBS 33.0 once it's released (OBS 33.0 notes in §4). Needed here because the comparison runs against the installed OBS, and knOBS refuses 33.x until then.
+- [x] Comparison vs OBS: same WAV (leading ~2 s of silence so envelopes settle identically) through an OBS Media Source with the chain pasted on and Mono/balance matched → record 32-bit float PCM. Run the same file through the harness with the imported chain. Align via cross-correlation; residual must fall below a set threshold (expect around −120 dB rather than zero, since packet sizes differ; see M1 findings. Investigate anything audible). `knobs-compare` automates all of it, OBS included. Bit-identical when both sides use the same packets; −120 dB with different ones (M2 findings).
+- [ ] Blind ABX on real voice: OBS vs knOBS. Moot for offline renders, which are bit-identical (M2 findings). Proposed instead: a `knobs-compare` run on a recording of real voice. Needs someone at the mic, and Daniel's decision on replacing the item.
+- [ ] Support OBS 33.0 once it's released (OBS 33.0 notes in §4). Needed here because the comparison runs against the installed OBS, and knOBS refuses 33.x until then. Still in beta on 2026-10-05 (33.0.0-beta6). The load fix is in.
 
 **M3 — Tray app**
 - [ ] Win32 tray: start/stop, device + cable pickers, re-import, autostart toggle, log access
@@ -260,6 +279,14 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 6 (2026-10-05)
+
+- M2 import done: the active profile and scene collection are found by the names saved in them, as OBS 32 does, with `[Locations]` and portable installs handled. Mics come from the global devices and `sources`, pre-flight runs on the source object, and the load follows the mic's origin. The details are in Config import (§4).
+- M2 comparison done: `knobs-compare` runs the user's real OBS from a portable copy and compares. knOBS's output is bit-identical to OBS's when the packets match. The −120 dB residual the plan expected comes only from packet size (M2 findings).
+- Proposed replacing the ABX item with a comparison on real voice, since identical renders can't be told apart. Not decided yet.
+- `LoadSourceJson` now also overrides 33.0's `monitoring_enabled`. 33.0 is still in beta.
+- knOBS reads OBS's files itself rather than through `obs_data_create_from_json_file_safe`, which renames a backup over a broken file.
 
 ### Revision notes — Rev 5 (2026-10-04)
 

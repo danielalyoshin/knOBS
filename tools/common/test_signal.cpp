@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-#include "harness/test_signal.h"
+#include "common/test_signal.h"
 
 #include <cmath>
 #include <cstdint>

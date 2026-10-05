@@ -49,12 +49,14 @@ target_link_libraries(knobs_runtime
 
 # Shared by the dev tools and their unit tests; not part of the app.
 add_library(knobs_tools STATIC
+  tools/common/audio_diff.cpp
   tools/common/console.cpp
   tools/common/envelope.cpp
   tools/common/obs_import.cpp
   tools/common/offline_chain.cpp
   tools/common/push_source.cpp
   tools/common/sha256.cpp
+  tools/common/test_signal.cpp
   tools/common/text_file.cpp
   tools/common/wav.cpp
 )
@@ -64,7 +66,7 @@ target_link_libraries(knobs_tools PUBLIC knobs_runtime PRIVATE bcrypt)
 add_executable(knobs-smoke tools/smoke/smoke_main.cpp)
 target_link_libraries(knobs-smoke PRIVATE knobs_tools psapi)
 
-add_executable(knobs-harness tools/harness/harness_main.cpp tools/harness/test_signal.cpp)
+add_executable(knobs-harness tools/harness/harness_main.cpp)
 target_link_libraries(knobs-harness PRIVATE knobs_tools)
 
 add_executable(knobs-live tools/live/live_main.cpp tools/live/endpoints.cpp)
@@ -72,6 +74,9 @@ target_link_libraries(knobs-live PRIVATE knobs_tools ole32)
 
 add_executable(knobs-import tools/import/import_main.cpp)
 target_link_libraries(knobs-import PRIVATE knobs_tools)
+
+add_executable(knobs-compare tools/compare/compare_main.cpp tools/compare/obs_run.cpp)
+target_link_libraries(knobs-compare PRIVATE knobs_tools)
 
 add_executable(knobs-tests tests/unit_tests.cpp)
 target_link_libraries(knobs-tests PRIVATE knobs_tools delayimp)

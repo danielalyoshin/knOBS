@@ -19,6 +19,7 @@
 
 #include "audio/audio_devices.h"
 #include "audio/live_chain.h"
+#include "common/audio_diff.h"
 #include "common/console.h"
 #include "common/envelope.h"
 #include "common/sha256.h"
@@ -737,6 +738,65 @@ TEST(EstimateDelayFindsAShift) {
   Envelope unrelated(origin, bin, 8000);
   unrelated.Add(origin, 48000, 1, other.data(), other.size());
   CHECK(EstimateDelay(reference, unrelated, 500'000'000, 0, 6000).correlation < 0.5);
+}
+
+// --- Comparing audio -----------------------------------------------------------
+
+// Stereo bursts, the right channel quieter.
+FloatAudio StereoBursts(double seconds, uint32_t seed) {
+  const std::vector<float> mono = Bursts(seconds, seed);
+  FloatAudio audio{48000, 2, {}};
+  for (const float x : mono) {
+    audio.samples.push_back(x);
+    audio.samples.push_back(0.5f * x);
+  }
+  return audio;
+}
+
+// `audio` starting `frames` later (positive), or with its first -frames cut.
+FloatAudio Shifted(const FloatAudio& audio, int64_t frames) {
+  FloatAudio out{audio.sample_rate, audio.channels, {}};
+  if (frames >= 0) {
+    out.samples.assign(static_cast<size_t>(frames) * audio.channels, 0.0f);
+    out.samples.insert(out.samples.end(), audio.samples.begin(), audio.samples.end());
+  } else {
+    out.samples.assign(audio.samples.begin() + static_cast<ptrdiff_t>(-frames * audio.channels), audio.samples.end());
+  }
+  return out;
+}
+
+TEST(AlignAudioFindsOffsetsBothWays) {
+  const FloatAudio a = StereoBursts(4, 3);
+  const auto later = AlignAudio(a, Shifted(a, 12345), 48000);
+  // 257.19 ms: not a whole number of envelope bins, so the coarse match isn't
+  // perfect, but the frame search is.
+  CHECK(later.ok() && later->offset == 12345 && later->correlation > 0.9);
+  const auto earlier = AlignAudio(a, Shifted(a, -777), 48000);
+  CHECK(earlier.ok() && earlier->offset == -777);
+  CHECK(!AlignAudio(a, FloatAudio{44100, 2, a.samples}, 48000).ok());
+}
+
+TEST(DiffAudioMeasuresTheResidual) {
+  const FloatAudio a = StereoBursts(4, 5);
+  FloatAudio b = Shifted(a, 100);
+  const AudioDiff same = DiffAudio(a, b, 100);
+  CHECK(same.frames == a.frames() && same.identical_samples == same.samples && same.residual_rms == 0);
+  CHECK(same.signal_rms > 0 && std::fabs(same.gain - 1) < 1e-12);
+
+  // One sample off by 2^-20, in the second 100 ms window.
+  b.samples[(100 + 4800 + 10) * 2 + 1] += 1.0f / 1048576;
+  const AudioDiff one = DiffAudio(a, b, 100);
+  CHECK(one.identical_samples + 1 == one.samples);
+  CHECK(std::fabs(one.residual_peak - 1.0 / 1048576) < 1e-9);
+  CHECK(one.worst_window_frame == 4800);
+  const FloatAudio residual = Residual(a, b, 100);
+  CHECK(residual.frames() == a.frames() && residual.samples[(4800 + 10) * 2 + 1] != 0);
+
+  // Half as loud: the best-fit gain says so.
+  FloatAudio quiet = a;
+  for (float& x : quiet.samples) x *= 0.5f;
+  CHECK(std::fabs(ToDb(DiffAudio(a, quiet, 0).gain) - 6.0206) < 0.001);
+  CHECK(DiffAudio(a, b, 1'000'000).frames == 0);
 }
 
 TEST(EnvelopeIgnoresFramesOffTheGrid) {
