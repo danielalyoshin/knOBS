@@ -36,6 +36,8 @@ Don't open the mic without the user's go-ahead.
 - `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/compare/`, `tools/live/`: the dev tools above. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`.
 - `tests/`: unit tests, which don't need OBS, and the import test, which runs `knobs-import` on the made-up OBS settings in `tests/fixtures/obs-config`.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
+- `assets/`: the logo. The SVGs are the masters, and `knobs.ico` is the app icon for the tray app. `assets/README.md` has the colors and usage rules.
+- `PRODUCT.md`: who knobs is for, its voice and brand commitments. Read it before UI or copy work.
 
 ## Invariants
 - **Fidelity is the product.** Audio passes only through OBS's own filter code. No custom DSP and no "improvements".

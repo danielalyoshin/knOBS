@@ -1,0 +1,29 @@
+<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="20 40 200 152" width="400" height="304">
+<defs>
+        <linearGradient id="k5b-side" x1="0" x2="1"><stop offset="0" stop-color="#101113"></stop><stop offset=".24" stop-color="#4a4c52"></stop><stop offset=".55" stop-color="#1e1f23"></stop><stop offset="1" stop-color="#08080a"></stop></linearGradient>
+        <linearGradient id="k5b-skirt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e1f22"></stop><stop offset="1" stop-color="#3a3c41"></stop></linearGradient>
+        <radialGradient id="k5b-top" cx=".42" cy=".3" r=".8"><stop offset="0" stop-color="#505258"></stop><stop offset="1" stop-color="#26272b"></stop></radialGradient>
+        <clipPath id="k5b-clip"><path d="M54 72 V130 A66 28 0 0 0 186 130 V72 A66 28 0 0 1 54 72 Z"></path></clipPath>
+      </defs>
+      <path d="M24 135 V147 A96 40 0 0 0 216 147 V135 A96 40 0 0 1 24 135 Z" fill="url(#k5b-side)"></path>
+      <ellipse cx="120" cy="135" rx="96" ry="40" fill="url(#k5b-skirt)"></ellipse>
+      <ellipse cx="120" cy="135" rx="95" ry="39" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width="2"></ellipse>
+      <g transform="translate(120 135) scale(1 .4167)">
+        <g fill="#efebe3">
+          <rect x="-3" y="-94" width="6" height="18" rx="3" transform="rotate(-150)"></rect>
+          <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(-120)"></rect>
+          <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(-90)"></rect>
+          <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(90)"></rect>
+          <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(120)"></rect>
+        </g>
+        <rect x="-3" y="-94" width="6" height="18" rx="3" fill="#e5484d" transform="rotate(150)"></rect>
+      </g>
+      <path d="M54 72 V130 A66 28 0 0 0 186 130 V72 A66 28 0 0 1 54 72 Z" fill="url(#k5b-side)"></path>
+      <g clip-path="url(#k5b-clip)"><path d="M54.00 72.00L54.09 73.47L54.09 131.47L54.00 130.00ZM55.44 77.82L57.23 80.65L57.23 138.65L55.44 135.82ZM61.19 84.71L64.65 87.25L64.65 145.25L61.19 142.71ZM70.95 90.74L75.84 92.81L75.84 150.81L70.95 148.74ZM84.05 95.48L90.04 96.95L90.04 154.95L84.05 153.48ZM99.60 98.63L106.28 99.39L106.28 157.39L99.60 156.63ZM116.55 99.96L123.45 99.96L123.45 157.96L116.55 157.96ZM133.72 99.39L140.40 98.63L140.40 156.63L133.72 157.39ZM149.96 96.95L155.95 95.48L155.95 153.48L149.96 154.95ZM164.16 92.81L169.05 90.74L169.05 148.74L164.16 150.81ZM175.35 87.25L178.81 84.71L178.81 142.71L175.35 145.25ZM182.77 80.65L184.56 77.82L184.56 135.82L182.77 138.65ZM185.91 73.47L186.00 72.00L186.00 130.00L185.91 131.47Z" fill="#000" fill-opacity=".45"></path></g>
+      <ellipse cx="120" cy="72" rx="66" ry="28" fill="url(#k5b-top)"></ellipse>
+      <ellipse cx="120" cy="72" rx="65" ry="27" fill="none" stroke="#fff" stroke-opacity=".22" stroke-width="2"></ellipse>
+      <ellipse cx="120" cy="72.5" rx="52" ry="22" fill="#1d1e21"></ellipse>
+      <g transform="translate(120 72) scale(1 .4242)">
+        <rect x="-3.5" y="-48" width="7" height="34" rx="3.5" fill="#e5484d" transform="rotate(-50)"></rect>
+      </g>
+</svg>

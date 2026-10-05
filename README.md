@@ -1,4 +1,9 @@
-# knobs
+<h1>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/knobs-lockup-horizontal-light.svg">
+    <img src="assets/knobs-lockup-horizontal-dark.svg" alt="knobs" width="280">
+  </picture>
+</h1>
 
 **Your OBS mic chain, without OBS.**
 

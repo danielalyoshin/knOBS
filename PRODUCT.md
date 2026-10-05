@@ -1,0 +1,70 @@
+# Product
+
+<!-- impeccable:product-schema 1 -->
+
+## Platform
+
+windows
+
+## Users
+
+Windows users who want a processed mic (noise suppression, gate, expander, compressor, limiter) in Discord, Zoom, games and the browser. Two groups, both primary:
+
+- **OBS users with a tuned chain.** Streamers, podcasters and gamers, many with an XLR mic, who already tuned a filter chain in OBS and route it to a virtual cable. Today they keep OBS open all day to do that. They know OBS and its filters.
+- **People new to OBS.** People who install OBS only to tune a mic for knobs. They don't know OBS's filters or how to build a chain, so knobs has to explain that setup.
+
+The job for both: tune the mic once, get that sound in every app, and stop thinking about it.
+
+## Product Purpose
+
+knobs runs the mic filter chain from the user's OBS settings and sends the result to a virtual audio cable, with no OBS process. The audio goes through the user's own installed OBS filter code.
+
+Success (plan.md §7): with OBS closed and knobs in the tray, the mic sounds identical to OBS in every app. A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
+
+## Positioning
+
+knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from the user's own OBS install and recreates the mic with OBS's own loader, so its output is bit-identical to OBS's, on test signals and on real voice. Equalizer APO, VoiceMeeter, NVIDIA Broadcast and NoiseTorch use different DSP. OBS plugins such as atkAudio still need OBS open.
+
+## Operating Context
+
+- Lives in the Windows tray with no window by default, and starts with Windows.
+- Needs OBS Studio installed (32.2.x for now) and a virtual cable such as VB-Cable. Other apps pick the cable as their mic.
+- Users tune filters in OBS. knobs reads the active OBS profile and scene collection and never changes them.
+- Pauses while OBS runs and resumes when it exits, so the cable never gets the mic twice.
+- Found through GitHub, the OBS forums and r/obs.
+
+## Capabilities and Constraints
+
+- Done (M0 to M2): loading libobs from a private copy of the OBS install, importing the mic and its filters, the live path into the cable, and the comparison with OBS. Next: the tray app (M3), then packaging (M4).
+- No custom DSP and no "improvements". No filter editing in v1, since users tune in OBS. No VST filters in v1. Windows only in v1.
+- Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
+- Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device.
+- Open:
+  - How the first run explains OBS filters and building a chain to people new to OBS (M3).
+  - The tray icon: at 16 px the knob reads as a dark puck. Whether the tray needs a simpler glyph, and how running, paused and error states look (M3).
+  - An installer or a portable zip (M4).
+
+## Brand Commitments
+
+- **Name:** "knobs", all lowercase, even at the start of a sentence, as in the audio kind. It was knOBS until 2026-10-05. Code keeps it in one constant (`KNOBS_DISPLAY_NAME`), and user-facing strings use that constant.
+- **Voice:** plain and exact, like the README. Say what happened and what to do, in everyday words. Short sentences, no hype, no exclamation marks, no jokes. Give numbers when they help ("88 ms").
+- **Logo:** the knob mark (a dark knob with a red pointer, original artwork), the app icon and the horizontal lockup, in `assets/`. Don't recolor, rotate or stretch the knob. Usage rules are in `assets/README.md`.
+- **Logo colors:** ink `#17181b` on light and `#f2f0eb` on dark. Red `#d63c42` on light and `#e5484d` on dark, for the pointer and "obs" in the wordmark. The app icon's tile is `#ebe8e1`.
+- **Red "obs" in the wordmark:** kept on purpose (decided 2026-10-05), although the rename to knobs dropped "OBS" from the name. If the OBS team objects, revisit it, as with the name.
+- **Independence:** knobs isn't affiliated with or endorsed by the OBS Project. Say so wherever knobs is presented.
+
+## Evidence on Hand
+
+- knobs's output is bit-identical to OBS's on test signals and on a recording of real voice (M2, plan.md).
+- Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (M1, Audient iD4).
+- [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
+- The logo, app icon and lockups in `assets/`.
+- Not on hand, and not to be made up: users, testimonials, download counts, screenshots of the tray app (it doesn't exist yet), a website.
+
+## Product Principles
+
+1. **Fidelity is the product.** The sound is OBS's, bit for bit. Nothing in knobs changes the audio, and the app never offers to "enhance" it.
+2. **Invisible while it works.** Tray only, starts with Windows, nothing to look at once it's set up.
+3. **Loud when it breaks.** When the mic, the cable or OBS goes missing, say so in a notification that says what to do. Never fail silently.
+4. **OBS is the editor.** Tuning happens in OBS. knobs imports the chain, and for people new to OBS it explains how to set one up there rather than building one itself.
+5. **Leave OBS alone.** Never change OBS's settings or install. Make way while OBS runs instead of competing with it.

@@ -231,6 +231,8 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 - [ ] Detect installed-OBS version change on startup → prompt re-import / runtime refresh (restart the process to load the new copy; prune old copies)
 - [ ] Device disconnect/reconnect. win-wasapi's reconnect thread only runs after `activate`, which needs the video tick (M0 findings). Choose between the dummy canvas and re-creating the source via `obs_load_source()`; either way, knobs surfaces state rather than reimplementing capture.
 - [ ] Error surfacing via tray notifications
+- [ ] First run for people new to OBS: explain that knobs runs the mic filters set up in OBS, and point to how to build a chain there. The M4 setup guide covers it too.
+- [ ] Exe and tray icon from `assets/knobs.ico`. At 16 px the knob reads as a dark puck, so decide whether the tray needs a simpler glyph, and how running, paused and error look.
 - [ ] Long-run latency: run the mic into the cable for hours, alongside OBS for comparison, and watch for latency steps and clock drift (M1 findings). If latency creeps up, restarting the monitor resets it. Decide whether knobs should do that, for example while the mic is silent.
 
 **M4 — Ship**
@@ -256,7 +258,7 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 | OBS updates change scene JSON schema / filter IDs | `obs_load_source()` from the user's own OBS version; pre-flight validates and warns on unknown IDs. |
 | Chain includes a VST filter | Not supported in v1: stripped with a loud warning. v2 feature. |
 | NVIDIA noise suppression needs an external runtime | v1 promises Speex/RNNoise. In OBS 32 NVIDIA's filter lives in the separate `nv-filters` module, which v1 doesn't load, so a chain using it imports without it (warned). Loading `nv-filters` is a v2 idea. |
-| Trademark ("OBS" in name) | OBS Forum Resource and IP Policy (Jan 2026) asks tools to avoid the OBS acronym in names. The name is knobs, all lowercase, since 2026-10-05 (it was knOBS). If the OBS team asks for a change, reconsider then. The name is one constant in code. |
+| Trademark ("OBS" in name) | OBS Forum Resource and IP Policy (Jan 2026) asks tools to avoid the OBS acronym in names. The name is knobs, all lowercase, since 2026-10-05 (it was knOBS). If the OBS team asks for a change, reconsider then. The name is one constant in code. The logo's wordmark still colors "obs" red, on purpose; it falls under the same rule. |
 | OBS forum rules on AI-assisted code | Policy requires an AI-use disclaimer and discourages listing resources mostly written by AI. Include the disclaimer; be ready to explain authorship. |
 | GPL obligations | Fine: knobs is GPL-2.0-or-later (same as libobs) and open source. |
 
@@ -281,6 +283,11 @@ Checked against OBS 32.2.2's frontend (`OBSApp.cpp`, `OBSBasic_Profiles.cpp`, `O
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 7 (2026-10-05)
+
+- Added the logo in `assets/`: the knob mark, the app icon, the horizontal lockup (now at the top of the README) and `knobs.ico` for the tray app. The wordmark keeps its red "obs"; the trademark row covers it.
+- The audience includes people new to OBS, who'd install it only to tune a mic for knobs. Added an M3 item for a first run that explains the setup. Product context for design work is in `PRODUCT.md`.
 
 ### Revision notes — Rev 6 (2026-10-05)
 
