@@ -2,7 +2,7 @@
 
 Windows tray app that runs the user's OBS mic filter chain through their installed libobs and sends the result to a virtual audio cable, with no OBS process. Design, milestones and rationale are in [plan.md](plan.md). Read it before non-trivial work. When a decision changes, update it and tick milestone boxes as work lands.
 
-Status: M0 (runtime bootstrap) and M1 (live path and offline harness) are done against OBS 32.2.2, and the mic-to-cable latency matches OBS. In M2, config import and the comparison against OBS are done: knOBS's output is bit-identical to OBS's. The ABX item awaits a decision (plan.md, M2), and 33.0 support waits for its release. M3 (tray app) is next.
+Status: M0 (runtime bootstrap) and M1 (live path and offline harness) are done against OBS 32.2.2, and the mic-to-cable latency matches OBS. M2 (config import and the comparison against OBS) is done apart from OBS 33.0 support, which waits for 33.0's release: knOBS's output is bit-identical to OBS's, on test signals and real voice. M3 (tray app) is next.
 
 ## Stack
 - C++20, CMake, MSVC (VS 2022 or newer; the preset uses the newest installed Visual Studio), x64 only, static CRT.
