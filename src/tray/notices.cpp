@@ -57,12 +57,9 @@ std::string FullChain(const core::ChainSummary& chain) {
   return core::FormatChain(short_cable, false);
 }
 
-std::vector<std::string> Warnings(const core::Snapshot& snapshot) {
-  std::vector<std::string> warnings;
-  for (const import::ImportNote& note : snapshot.notes) {
-    if (note.warning) warnings.push_back(note.text);
-  }
-  return warnings;
+// What a warning is about, so renaming its filter in OBS isn't a new warning.
+const std::string& WarningKey(const import::ImportNote& note) {
+  return note.key.empty() ? note.text : note.key;
 }
 
 // --- Copy ---------------------------------------------------------------------------
@@ -299,10 +296,13 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
 
   // Changes in OBS, after the first import. A problem says more.
   if (snapshot.chain) {
-    std::vector<std::string> warnings = Warnings(snapshot);
+    std::vector<std::string> warnings;
     std::vector<std::string> added;
-    for (const std::string& warning : warnings) {
-      if (std::find(warnings_.begin(), warnings_.end(), warning) == warnings_.end()) added.push_back(warning);
+    for (const import::ImportNote& note : snapshot.notes) {
+      if (!note.warning) continue;
+      const std::string& key = WarningKey(note);
+      if (std::find(warnings_.begin(), warnings_.end(), key) == warnings_.end()) added.push_back(note.text);
+      warnings.push_back(key);
     }
     // A mic picked in knobs, or a new cable, isn't news.
     const bool changed =

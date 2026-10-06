@@ -136,6 +136,7 @@ class Notifier {
   std::optional<std::pair<core::State, core::SetupNeed>> problem_;
   // What the last import that found the mic found.
   uint32_t chain_revision_ = 0;
+  // Its warnings, by what each is about (WarningKey).
   std::vector<std::string> warnings_;
   std::string mic_name_;
   runtime::ObsVersion obs_version_;

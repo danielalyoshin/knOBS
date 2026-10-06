@@ -70,6 +70,10 @@ struct ImportNote {
   // A note that changes what to expect all the same, such as push-to-talk
   // not silencing the cable. The first run shows these with the warnings.
   bool changes_expectations = false;
+  // What a filter's note is about, which renaming in OBS doesn't change: the
+  // kind of note and the filter's uuid. Notifications tell a new warning from
+  // a renamed filter's by it. Empty for the source's own notes.
+  std::string key;
 
   friend bool operator==(const ImportNote&, const ImportNote&) = default;
 };

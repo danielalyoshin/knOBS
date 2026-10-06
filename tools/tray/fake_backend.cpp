@@ -59,9 +59,11 @@ void MonitorToDefault(FakeWorld& world) {
 }
 
 import::ImportNote VstWarning() {
-  return {true, std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
-                            "plugins yet, so it leaves the filter out.",
-                            kDisplayName)};
+  return {.warning = true,
+          .text = std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
+                              "plugins yet, so it leaves the filter out.",
+                              kDisplayName),
+          .key = "vst 6f0c1d2e-reacomp"};
 }
 
 // No virtual cable is installed. VB-Cable's input is the spare.

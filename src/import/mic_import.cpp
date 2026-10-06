@@ -179,6 +179,11 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
   const std::string type = VersionedId(api, filter);
   const bool enabled = Bool(api, filter, "enabled", true);
   DataPtr settings = Own(api, api.obs_data_get_obj(filter, "settings"));
+  // Keys the note just added by what it's about, so a rename isn't a new note.
+  const std::string uuid = String(api, filter, "uuid");
+  const auto key = [&](std::string_view kind) {
+    notes.back().key = std::format("{} {}", kind, uuid.empty() ? name : uuid);
+  };
 
   if (id == kVstFilterId) {
     const std::string plugin = settings ? FileName(String(api, settings.get(), "plugin_path")) : "";
@@ -188,6 +193,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
                                       : std::format("Filter \"{}\", a VST plugin, is off in OBS. {} leaves it "
                                                     "out.",
                                                     name, kDisplayName)});
+    key("vst");
     return false;
   }
   if (api.obs_get_source_output_flags(type.c_str()) == 0) {
@@ -204,10 +210,12 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
                                          "untouched.",
                                          name, type, kDisplayName)});
     }
+    key("unknown");
     return true;
   }
   if (!enabled) {
     notes.push_back({false, std::format("Filter \"{}\" is off in OBS, and stays off.", name)});
+    key("off");
     return true;
   }
   if (const auto ducking = AsDucking(api, filter)) {
@@ -222,6 +230,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
       notes.push_back({true, std::format("{} {} loads only the mic, so it keeps only this compressor's output gain "
                                          "({:+.1f} dB), {}",
                                          what, kDisplayName, ducking->output_gain, then)});
+      key("ducking");
       return true;
     }
     // At 0 dB, or if libobs couldn't copy the filter.
@@ -231,6 +240,7 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
                                : std::format("{} {} loads only the mic, so it leaves this compressor out, and its "
                                              "output gain ({:+.1f} dB) with it.",
                                              what, kDisplayName, ducking->output_gain)});
+    key("ducking");
     return false;
   }
   return true;

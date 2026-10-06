@@ -337,6 +337,15 @@ TEST(NoticesSayAFilterKnobsCantRun) {
     tools::EditChain(world);
   });
   CHECK(f.events.size() == 3 && f.last.kind == Notice::Kind::kFilterWarnings);
+
+  // The filter renamed in OBS: its warning's text changes, but it isn't new.
+  f.ObsOpens();
+  f.ObsCloses([](FakeWorld& world) {
+    import::ImportNote& warning = world.collection.front().notes.front();
+    warning.text.replace(warning.text.find("ReaComp"), 7, "Comp");
+  });
+  CHECK(f.controller.snapshot().notes.front().text.starts_with("Filter \"Comp\""));
+  CHECK(f.events.size() == 3);
 }
 
 // The notification for `warnings`, new on Mic/Aux when OBS closes.
