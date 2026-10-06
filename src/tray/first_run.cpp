@@ -477,7 +477,7 @@ PageView Warnings(const core::Snapshot& snapshot) {
   return view;
 }
 
-PageView Done(const core::Snapshot& snapshot) {
+PageView Done(const core::Snapshot& snapshot, bool start_checked) {
   PageView view;
   view.instruction = "Your mic is set up";
   core::ChainSummary chain = snapshot.chain.value_or(core::ChainSummary{});
@@ -506,7 +506,7 @@ PageView Done(const core::Snapshot& snapshot) {
       break;
   }
   view.check = std::format("Start {} with Windows", kDisplayName);
-  view.checked = true;
+  view.checked = start_checked;
   view.buttons = {Button(kButtonBack, "Back"), Button(kButtonDone, "Done")};
   view.default_button = kButtonDone;
   return view;
@@ -544,7 +544,8 @@ std::vector<audio::AudioDevice> CableChoices(const core::Snapshot& snapshot) {
   return choices;
 }
 
-FirstRun::FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page) : progress_(progress) {
+FirstRun::FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page, bool start_with_windows)
+    : progress_(progress), start_checked_(!progress.done || start_with_windows) {
   if (!page) return;
   switch (*page) {
     case Page::kWelcome:
@@ -612,7 +613,7 @@ PageView FirstRun::View(const core::Snapshot& snapshot, int choice, std::optiona
       view = Warnings(snapshot);
       break;
     case Page::kDone:
-      view = Done(snapshot);
+      view = Done(snapshot, start_checked_);
       break;
   }
   view.page = page;

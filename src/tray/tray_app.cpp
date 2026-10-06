@@ -544,7 +544,8 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
     progress = from_start ? FirstRunProgress{.done = true}
                           : FirstRunProgress{.done = true, .door = Door::kObsUser, .reached = FirstRunPage::kDone};
   }
-  FirstRunDialog dialog(*this, options_.instance, FirstRun(progress, page));
+  const bool starts = options_.starts_with_windows && options_.starts_with_windows();
+  FirstRunDialog dialog(*this, options_.instance, FirstRun(progress, page, starts));
   first_run_dialog_ = &dialog;
   dialog.Show();
   first_run_dialog_ = nullptr;

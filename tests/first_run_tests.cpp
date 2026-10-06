@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <format>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -158,6 +159,30 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   const FirstRunAction finish = first_run.Click(kButtonDone, 0, true, Running());
   CHECK(finish.kind == Kind::kFinish && finish.start_with_windows && first_run.progress().done);
   CHECK(first_run.Click(kButtonDone, 0, false, Running()).start_with_windows == false);
+
+  // A first run offers Start with Windows checked, even while it's off. One
+  // that was finished, opened again, offers it as it is, so that Done
+  // doesn't turn it back on.
+  const PageView first =
+      FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, std::nullopt, false).View(Running());
+  CHECK(first.page == Page::kDone && first.checked);
+
+  // Also on the way from a page a notification opened.
+  const FirstRunProgress finished = {.done = true, .door = Door::kObsUser, .reached = Page::kDone};
+  core::Snapshot warned = Running();
+  warned.notes = {{true, "Filter \"ReaComp\" is a VST plugin."}};
+  for (const bool on : {false, true}) {
+    FirstRun again(finished, std::nullopt, on);
+    PageView last = again.View(Running());
+    CHECK(last.page == Page::kDone && last.checked == on);
+    CHECK(again.Click(kButtonDone, 0, last.checked, Running()).start_with_windows == on);
+
+    FirstRun warnings(finished, Page::kWarnings, on);
+    CHECK(warnings.Page(warned) == Page::kWarnings);
+    warnings.Click(kButtonNext, 0, false, warned);
+    last = warnings.View(warned);
+    CHECK(last.page == Page::kDone && last.checked == on);
+  }
 
   // The last page says why the mic isn't running yet.
   core::Snapshot paused = Running();

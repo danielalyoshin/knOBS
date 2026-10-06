@@ -132,8 +132,12 @@ class FirstRun {
  public:
   // Starts from `progress`, at `page` if given (the dev tools open any page
   // with it). A page that doesn't apply to the state shows the page that
-  // does instead.
-  explicit FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page = std::nullopt);
+  // does instead. `start_with_windows` is whether knobs starts with Windows
+  // now. The last page offers it checked on a first run, and as it is when
+  // one that was finished is opened again, so that Done changes nothing the
+  // user didn't.
+  explicit FirstRun(FirstRunProgress progress, std::optional<FirstRunPage> page = std::nullopt,
+                    bool start_with_windows = false);
 
   const FirstRunProgress& progress() const { return progress_; }
 
@@ -154,6 +158,8 @@ class FirstRun {
   void Back(const core::Snapshot& snapshot);
 
   FirstRunProgress progress_;
+  // Start with Windows, as the last page offers it.
+  bool start_checked_ = true;
   // A page shown out of turn: one gone Back to, or asked for.
   std::optional<FirstRunPage> focus_;
   std::vector<FirstRunPage> history_;
