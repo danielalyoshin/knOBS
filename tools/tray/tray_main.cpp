@@ -85,8 +85,7 @@ against the fake.
 
 Options:
   --state <name>         The state to start in (below). Default: running.
-  --theme <name>         system (Windows' mode), light or dark, for the menu and
-                         the badges' colors. Default: system.
+  --theme <name>         system (Windows' mode), light or dark. Default: system.
   --settings <file>      Read the settings from this file and save changes to it.
                          Without it, the first run counts as finished unless
                          --first-run is given.
@@ -578,7 +577,7 @@ void TakeNotificationScreenshot() {
 }
 
 // Each size of the tray icon with each badge, magnified and as it is, on a
-// light and a dark taskbar.
+// light and a dark taskbar's color. The icons are the same on both.
 int SaveIconSheet(const fs::path& file) {
   const int cell = kIconSizes[std::size(kIconSizes) - 1] * (kIconZoom + 1) + 3 * kMarginPx;
   const int columns = static_cast<int>(std::size(kIconSizes));
@@ -601,7 +600,7 @@ int SaveIconSheet(const fs::path& file) {
         auto pixels = tray::ReadIcon(icon);
         DestroyIcon(icon);
         if (!pixels) continue;
-        const tray::IconPixels badged = tray::AddBadge(std::move(*pixels), kBadges[row], dark != 0);
+        const tray::IconPixels badged = tray::AddBadge(std::move(*pixels), kBadges[row]);
         // Over the background, magnified, then as it is beside it.
         const auto put = [&](int x, int y, uint32_t pixel) {
           const float alpha = (pixel >> 24) / 255.0f;

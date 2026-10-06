@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <format>
 #include <functional>
 #include <memory>
@@ -480,28 +481,27 @@ uint32_t Alpha(uint32_t pixel) { return pixel >> 24; }
 TEST(BadgesSitInTheCorner) {
   for (const int size : {16, 20, 24, 32}) {
     IconPixels icon{size, std::vector<uint32_t>(static_cast<size_t>(size) * size, 0xff808080)};
-    CHECK(AddBadge(icon, Badge::kNone, true).bgra == icon.bgra);
+    CHECK(AddBadge(icon, Badge::kNone).bgra == icon.bgra);
     for (const Badge badge : {Badge::kPaused, Badge::kAttention}) {
-      for (const bool dark : {false, true}) {
-        const IconPixels badged = AddBadge(icon, badge, dark);
-        // The icon's top left is untouched; the badge's middle is opaque
-        // and something else; the corner of its square is clear, past the
-        // ring.
-        CHECK(At(badged, 0, 0) == 0xff808080 && At(badged, size / 3, size / 3) == 0xff808080);
-        const float radius = size * 9.0f / 32;
-        const float center = size - radius;
-        const float gap = std::max(1.0f, size / 16.0f);
-        const int middle = static_cast<int>(center);
-        CHECK(Alpha(At(badged, middle, middle)) == 255 && At(badged, middle, middle) != 0xff808080);
-        CHECK(Alpha(At(badged, static_cast<int>(center - radius - gap / 2), middle)) < 128);
-      }
+      const IconPixels badged = AddBadge(icon, badge);
+      // The icon's top left is untouched; the badge's middle is opaque and
+      // something else; the ring around the badge is clear.
+      CHECK(At(badged, 0, 0) == 0xff808080 && At(badged, size / 3, size / 3) == 0xff808080);
+      const float radius = std::round(size * 9.0f / 16) / 2;
+      const float center = size - radius;
+      const float gap = std::max(1.0f, std::round(size / 16.0f));
+      const int middle = static_cast<int>(center);
+      CHECK(Alpha(At(badged, middle, middle)) == 255 && At(badged, middle, middle) != 0xff808080);
+      CHECK(Alpha(At(badged, static_cast<int>(center - radius - gap / 2), middle)) < 128);
     }
-    // The pause badge follows the taskbar: light on dark, dark on light.
-    const auto lightness = [&](bool dark) {
-      const IconPixels badged = AddBadge(icon, Badge::kPaused, dark);
-      return At(badged, size - size * 9 / 32 - 1, size - 2) & 0xff;
+    // Windows 11's caution and neutral colors, beside the mark.
+    const auto fill = [&](Badge badge) {
+      const IconPixels badged = AddBadge(icon, badge);
+      const float radius = std::round(size * 9.0f / 16) / 2;
+      const float center = size - radius;
+      return At(badged, static_cast<int>(center - 0.6f * radius), static_cast<int>(center + 0.3f * radius)) & 0xffffff;
     };
-    CHECK(lightness(true) > 0xc0 && lightness(false) < 0x40);
+    CHECK(fill(Badge::kAttention) == 0xfce100 && fill(Badge::kPaused) == 0x9d9d9d);
   }
 }
 

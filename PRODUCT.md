@@ -47,7 +47,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 - **Name:** "knobs", all lowercase, even at the start of a sentence, as in the audio kind. It was knOBS until 2026-10-05. Code keeps it in one constant (`KNOBS_DISPLAY_NAME`), and user-facing strings use that constant.
 - **Voice:** plain and exact, like the README. Say what happened and what to do, in everyday words. Short sentences, no hype, no exclamation marks, no jokes. Give numbers when they help ("88 ms").
 - **Logo:** the knob mark (a dark knob with a red pointer, original artwork), the app icon and the horizontal lockup, in `assets/`. Don't recolor, rotate or stretch the knob. Usage rules are in `assets/README.md`.
-- **Logo colors:** ink `#17181b` on light and `#e8eaee` on dark. Red `#d63c42` on light and `#e5484d` on dark, for the pointer and "obs" in the wordmark. The app icon's tile and the knob's ticks are `#e8eaee`, a light tone of the knob's cool graphite. No cream (decided 2026-10-05).
+- **Logo colors:** ink `#17181b` on light and `#e8eaee` on dark. Red `#d63c42` on light and `#e5484d` on dark, for the pointer and "obs" in the wordmark. The knob's ticks are `#e8eaee`, a light tone of the knob's cool graphite. No cream (decided 2026-10-05). The app icon is the knob alone, with no tile (decided 2026-10-05).
 - **Red "obs" in the wordmark:** kept on purpose (decided 2026-10-05), although the rename to knobs dropped "OBS" from the name. If the OBS team objects, revisit it, as with the name.
 - **Independence:** knobs isn't affiliated with or endorsed by the OBS Project. Say so wherever knobs is presented.
 

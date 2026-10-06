@@ -16,23 +16,20 @@ constexpr Color Rgb(uint32_t rgb) {
   return {((rgb >> 16) & 0xff) / 255.0f, ((rgb >> 8) & 0xff) / 255.0f, (rgb & 0xff) / 255.0f};
 }
 
-// The logo's ink and light gray (assets/README.md), and an amber that reads
-// on both, with a darker rim against a light taskbar.
-constexpr Color kInk = Rgb(0x17181b);
-constexpr Color kLight = Rgb(0xe8eaee);
-constexpr Color kAmber = Rgb(0xf5a400);
-constexpr Color kAmberRim = Rgb(0xa86a00);
+// Windows 11's status badge colors, as WinUI's InfoBadge and InfoBar use
+// them in dark mode: SystemFillColorCaution for "!" and
+// SystemFillColorSolidNeutral for pause, both with a black mark. The same on
+// a light taskbar (decided 2026-10-05).
+struct Palette {
+  Color fill;
+  Color mark;
+};
 
-// In fractions of the badge's diameter, from its center.
+Palette Colors(Badge badge) {
+  return {Rgb(badge == Badge::kAttention ? 0xfce100 : 0x9d9d9d), Rgb(0x000000)};
+}
+
 constexpr float kBadge = 0.5625f;  // Of the icon's size: 9 px at 16.
-constexpr float kStemHalfWidth = 0.1f;
-constexpr float kStemTop = -0.32f;
-constexpr float kStemBottom = 0.08f;
-constexpr float kDotCenter = 0.27f;
-constexpr float kDotRadius = 0.11f;
-constexpr float kBarHalfWidth = 0.09f;
-constexpr float kBarHalfHeight = 0.24f;
-constexpr float kBarOffset = 0.15f;
 
 // How much of a pixel a shape covers, from the signed distance of the
 // pixel's center to the shape's edge, in pixels (negative inside).
@@ -51,25 +48,71 @@ Color Mix(Color a, Color b, float t) { return {a.r + (b.r - a.r) * t, a.g + (b.g
 
 uint8_t Byte(float value) { return static_cast<uint8_t>(std::lround(std::clamp(value, 0.0f, 1.0f) * 255.0f)); }
 
+// The nearest whole number to `value` that's odd if `odd`, else even: a
+// stroke that size centered on a badge of that parity has whole-pixel edges.
+int WithParity(float value, bool odd) {
+  int whole = static_cast<int>(std::lround(value));
+  if ((whole % 2 != 0) != odd) whole += value > whole ? 1 : -1;
+  return std::max(odd ? 1 : 2, whole);
+}
+
+// The badge's mark, as coverage of each of the icon's pixels: Windows 11's
+// "!" and pause in proportion, with whole-pixel strokes, so they stay crisp
+// at tray sizes.
+std::vector<float> Mark(Badge badge, int size, int diameter) {
+  std::vector<float> mark(static_cast<size_t>(size) * size, 0.0f);
+  const bool odd = diameter % 2 != 0;
+  // The badge's top-left corner.
+  const int corner = size - diameter;
+  const auto fill = [&](int left, int top, int width, int height, bool round) {
+    const float radius = round ? std::min(width, height) / 2.0f : 0.0f;
+    for (int y = top; y < top + height; ++y) {
+      for (int x = left; x < left + width; ++x) {
+        float coverage = 1.0f;
+        if (radius >= 1.5f) {
+          coverage = Coverage(RoundedRect(x + 0.5f, y + 0.5f, left + width / 2.0f, top + height / 2.0f,
+                                          width / 2.0f, height / 2.0f));
+        }
+        if (x >= 0 && y >= 0 && x < size && y < size) mark[static_cast<size_t>(y) * size + x] = coverage;
+      }
+    }
+  };
+  if (badge == Badge::kAttention) {
+    // A stem and a dot a stroke apart, about half the badge tall.
+    const int stroke = WithParity(diameter * 0.11f, odd);
+    const int height = WithParity(diameter * 0.56f, odd);
+    const int left = corner + (diameter - stroke) / 2;
+    const int top = corner + (diameter - height) / 2;
+    fill(left, top, stroke, height - 2 * stroke, true);
+    fill(left, top + height - stroke, stroke, stroke, true);
+  } else {
+    // Two solid bars, as Windows' pause glyph has them.
+    const int bar = std::max(1, static_cast<int>(std::lround(diameter * 0.18f)));
+    int gap = std::max(1, static_cast<int>(std::lround(diameter * 0.12f)));
+    if (((2 * bar + gap) % 2 != 0) != odd) ++gap;
+    const int height = WithParity(diameter * 0.5f, odd);
+    const int left = corner + (diameter - (2 * bar + gap)) / 2;
+    const int top = corner + (diameter - height) / 2;
+    fill(left, top, bar, height, true);
+    fill(left + bar + gap, top, bar, height, true);
+  }
+  return mark;
+}
+
 }  // namespace
 
-IconPixels AddBadge(IconPixels icon, Badge badge, bool dark_taskbar) {
+IconPixels AddBadge(IconPixels icon, Badge badge) {
   if (badge == Badge::kNone || icon.size <= 0) return icon;
   const float size = static_cast<float>(icon.size);
-  const float diameter = size * kBadge;
+  // Whole pixels, flush with the corner.
+  const int whole_diameter = static_cast<int>(std::lround(size * kBadge));
+  const float diameter = static_cast<float>(whole_diameter);
   const float radius = diameter / 2;
   const float center = size - radius;
   // The clear ring: a pixel at 16 px, two at 32.
-  const float gap = std::max(1.0f, size / 16);
-  const float rim = size / 24;
-
-  Color fill = kAmber;
-  Color mark = kInk;
-  if (badge == Badge::kPaused) {
-    fill = dark_taskbar ? kLight : kInk;
-    mark = dark_taskbar ? kInk : kLight;
-  }
-  const bool has_rim = badge == Badge::kAttention && !dark_taskbar;
+  const float gap = std::max(1.0f, std::round(size / 16));
+  const Palette colors = Colors(badge);
+  const std::vector<float> mark = Mark(badge, icon.size, whole_diameter);
 
   for (int y = 0; y < icon.size; ++y) {
     for (int x = 0; x < icon.size; ++x) {
@@ -79,26 +122,10 @@ IconPixels AddBadge(IconPixels icon, Badge badge, bool dark_taskbar) {
       const float cut = Coverage(distance - (radius + gap));
       const float disc = Coverage(distance - radius);
       if (cut <= 0) continue;
+      const size_t index = static_cast<size_t>(y) * icon.size + x;
+      const Color color = Mix(colors.fill, colors.mark, mark[index]);
 
-      float mark_distance = 0;
-      if (badge == Badge::kAttention) {
-        const float stem_center = center + diameter * (kStemTop + kStemBottom) / 2;
-        const float stem = RoundedRect(px, py, center, stem_center, diameter * kStemHalfWidth,
-                                       diameter * (kStemBottom - kStemTop) / 2);
-        const float dot = std::hypot(px - center, py - (center + diameter * kDotCenter)) - diameter * kDotRadius;
-        mark_distance = std::min(stem, dot);
-      } else {
-        const float half_width = diameter * kBarHalfWidth;
-        const float half_height = diameter * kBarHalfHeight;
-        mark_distance =
-            std::min(RoundedRect(px, py, center - diameter * kBarOffset, center, half_width, half_height),
-                     RoundedRect(px, py, center + diameter * kBarOffset, center, half_width, half_height));
-      }
-      Color color = fill;
-      if (has_rim) color = Mix(kAmberRim, fill, Coverage(distance - (radius - rim)));
-      color = Mix(color, mark, Coverage(mark_distance));
-
-      uint32_t& pixel = icon.bgra[static_cast<size_t>(y) * icon.size + x];
+      uint32_t& pixel = icon.bgra[index];
       const float base_alpha = ((pixel >> 24) / 255.0f) * (1 - cut);
       const Color base = Rgb(pixel & 0xffffff);
       const float alpha = disc + base_alpha * (1 - disc);
@@ -184,11 +211,11 @@ HICON CreateIconFrom(const IconPixels& pixels) {
   return result;
 }
 
-HICON BadgedIcon(HICON icon, Badge badge, bool dark_taskbar) {
+HICON BadgedIcon(HICON icon, Badge badge) {
   if (!icon) return nullptr;
   if (badge == Badge::kNone) return CopyIcon(icon);
   auto pixels = ReadIcon(icon);
-  return pixels ? CreateIconFrom(AddBadge(std::move(*pixels), badge, dark_taskbar)) : nullptr;
+  return pixels ? CreateIconFrom(AddBadge(std::move(*pixels), badge)) : nullptr;
 }
 
 }  // namespace knobs::tray

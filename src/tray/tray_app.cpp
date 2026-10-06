@@ -277,9 +277,6 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (wparam == SPI_SETHIGHCONTRAST ||
           (lparam && std::wstring_view(reinterpret_cast<const wchar_t*>(lparam)) == L"ImmersiveColorSet")) {
         ApplyMenuTheme(options_.theme);
-        // The badges' colors follow the taskbar.
-        LoadIcons();
-        SetIcon();
       }
       break;
     case WM_QUERYENDSESSION:
@@ -305,13 +302,11 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
 
 void TrayApp::LoadIcons() {
   DestroyIcons();
-  const bool dark = options_.theme == MenuTheme::kDark ||
-                    (options_.theme == MenuTheme::kSystem && WindowsModeIsDark());
   const HICON small = LoadAppIcon(options_.instance, LIM_SMALL);
   const HICON large = LoadAppIcon(options_.instance, LIM_LARGE);
   for (const Badge badge : kBadges) {
-    icons_[static_cast<size_t>(badge)] = BadgedIcon(small, badge, dark);
-    large_icons_[static_cast<size_t>(badge)] = BadgedIcon(large, badge, dark);
+    icons_[static_cast<size_t>(badge)] = BadgedIcon(small, badge);
+    large_icons_[static_cast<size_t>(badge)] = BadgedIcon(large, badge);
   }
   if (small) DestroyIcon(small);
   if (large) DestroyIcon(large);
@@ -357,21 +352,18 @@ void TrayApp::UpdateTip() {
   Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 
-void TrayApp::SetIcon() {
-  if (!icon_added_) return;
-  NOTIFYICONDATAW data = {sizeof(data)};
-  data.hWnd = window_;
-  data.uID = kIconId;
-  data.uFlags = NIF_ICON;
-  data.hIcon = icons_[static_cast<size_t>(badge_)];
-  Shell_NotifyIconW(NIM_MODIFY, &data);
-}
-
 void TrayApp::UpdateBadge() {
   const Badge badge = notifier_.badge();
   if (badge == badge_) return;
   badge_ = badge;
-  SetIcon();
+  if (icon_added_) {
+    NOTIFYICONDATAW data = {sizeof(data)};
+    data.hWnd = window_;
+    data.uID = kIconId;
+    data.uFlags = NIF_ICON;
+    data.hIcon = icons_[static_cast<size_t>(badge_)];
+    Shell_NotifyIconW(NIM_MODIFY, &data);
+  }
   if (options_.on_badge) options_.on_badge(badge_);
 }
 

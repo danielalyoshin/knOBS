@@ -9,7 +9,7 @@
 
 knobs is a Windows tray app in the making. It runs the microphone filter chain you tuned in OBS Studio (noise suppression, gate, expander, compressor, limiter) and sends the result to a virtual audio cable. Discord, Zoom and games get the same processed mic while OBS stays closed.
 
-> **Status: early development, not ready for use.** Loading libobs, importing your mic from OBS, the live audio path, the always-on core, the tray menu, the first run that sets knobs up and its notifications work, and the dev tools below exercise them. For the same input, knobs's output is bit-identical to OBS's. Its own tray icon is next. [plan.md](plan.md) has the design and milestones.
+> **Status: early development, not ready for use.** Loading libobs, importing your mic from OBS, the live audio path, the always-on core, the tray menu, the first run that sets knobs up and its notifications work, and the dev tools below exercise them. For the same input, knobs's output is bit-identical to OBS's. Long-run testing and packaging are next. [plan.md](plan.md) has the design and milestones.
 
 ## How it works
 

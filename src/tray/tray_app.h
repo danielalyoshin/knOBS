@@ -108,13 +108,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
 
-  // The icons with each badge, for the tray and for notifications, in
-  // colors for the taskbar.
+  // The icons with each badge, for the tray and for notifications.
   void LoadIcons();
   void DestroyIcons();
   void AddIcon();
-  // Shows the icon with the badge it has.
-  void SetIcon();
   void UpdateTip();
   void UpdateBadge();
   // Shows or takes down a notification, then updates the badge and the

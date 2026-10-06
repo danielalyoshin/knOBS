@@ -1,5 +1,5 @@
-<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-<rect width="512" height="512" rx="114" fill="#e8eaee"></rect><svg x="56.00" y="104.00" width="400.00" height="304.00" viewBox="20 40 200 152"><defs>
+<?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="22 17.5 196 196" width="512" height="512">
+<defs>
         <linearGradient id="k5b-side" x1="0" x2="1"><stop offset="0" stop-color="#101113"></stop><stop offset=".24" stop-color="#4a4c52"></stop><stop offset=".55" stop-color="#1e1f23"></stop><stop offset="1" stop-color="#08080a"></stop></linearGradient>
         <linearGradient id="k5b-skirt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e1f22"></stop><stop offset="1" stop-color="#3a3c41"></stop></linearGradient>
         <radialGradient id="k5b-top" cx=".42" cy=".3" r=".8"><stop offset="0" stop-color="#505258"></stop><stop offset="1" stop-color="#26272b"></stop></radialGradient>
@@ -25,5 +25,5 @@
       <ellipse cx="120" cy="72.5" rx="52" ry="22" fill="#1d1e21"></ellipse>
       <g transform="translate(120 72) scale(1 .4242)">
         <rect x="-3.5" y="-48" width="7" height="34" rx="3.5" fill="#e5484d" transform="rotate(-50)"></rect>
-      </g></svg>
+      </g>
 </svg>
