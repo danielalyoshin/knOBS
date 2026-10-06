@@ -2,6 +2,7 @@
 #include "runtime/obs_host.h"
 
 #include <format>
+#include <optional>
 
 #include "app_info.h"
 #include "util/win_strings.h"
@@ -15,6 +16,9 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
                  : options.obs_dir ? InspectObsInstall(*options.obs_dir)
                                    : FindObsInstall();
   if (!install) return Error{install.error()};
+  // Until obs.dll has loaded from the copy, so another process pruning
+  // copies can't remove it in between (PruneRuntimeCopies).
+  std::optional<RuntimeCopyLock> copy_lock(std::in_place);
   auto copy = EnsureRuntimeCopy(*install, dirs->RuntimeBase(), false);
   if (!copy) return Error{copy.error()};
   auto log = OpenNewLog(dirs->Logs(), options.log_prefix, options.kept_logs);
@@ -22,6 +26,7 @@ Result<std::unique_ptr<ObsHost>> ObsHost::Start(const HostOptions& options) {
   (*log)->set_echo(options.verbose);
   (*log)->set_verbose(options.verbose);
   auto runtime = ObsRuntime::Load(copy->root);
+  copy_lock.reset();
   if (!runtime) return Error{runtime.error()};
 
   std::unique_ptr<ObsHost> host(new ObsHost());

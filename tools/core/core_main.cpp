@@ -74,6 +74,9 @@ Options:
                            profile's monitoring device.
 {1}
   --obs-dir <folder>       Use this OBS install instead of searching for one.
+  --prune-runtime          Once libobs has started, remove the OBS runtime copies
+                           no program uses, as {0} does. The log says what was
+                           removed and what was left.
   --verbose                Echo the libobs log, including debug lines.
 
 Keys while it runs: p pauses, r resumes, i imports again, q quits.
@@ -89,6 +92,7 @@ struct Options {
   std::string cable;
   ImportArgs import_args;
   std::optional<fs::path> obs_dir;
+  bool prune_runtime = false;
   bool verbose = false;
 };
 
@@ -111,6 +115,9 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       takes_value = false;
     } else if (arg == L"--ignore-obs") {
       options.ignore_obs = true;
+      takes_value = false;
+    } else if (arg == L"--prune-runtime") {
+      options.prune_runtime = true;
       takes_value = false;
     } else if (arg == L"--verbose") {
       options.verbose = true;
@@ -282,6 +289,7 @@ int Run(const Options& options) {
   backend_options.log_prefix = L"core ";
   backend_options.verbose = options.verbose;
   backend_options.pick_by_number = true;  // --pick takes a number too.
+  backend_options.prune_runtime = options.prune_runtime;
   backend_options.on_shutdown = [&leaks](long live, const runtime::ObsLog& log) {
     leaks = live;
     Check(live == 0, "shutdown", live == 0 ? "0 leaked allocations" : std::format("{} libobs allocations leaked", live));

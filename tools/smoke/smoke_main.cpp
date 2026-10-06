@@ -399,7 +399,8 @@ int Run(const Options& options) {
     Print(std::format("       Imported from the system, not copied:{}\n", system));
   }
 
-  // Runtime copy.
+  // Runtime copy. Locked until obs.dll has loaded from it, as ObsHost does.
+  std::optional<RuntimeCopyLock> copy_lock(std::in_place);
   auto copy = EnsureRuntimeCopy(*install, dirs->RuntimeBase(), options.refresh_runtime);
   if (!copy) {
     Check(false, "runtime copy", copy.error());
@@ -419,6 +420,7 @@ int Run(const Options& options) {
 
   // Load obs.dll from the copy.
   auto runtime = ObsRuntime::Load(copy->root);
+  copy_lock.reset();
   if (!runtime) {
     Check(false, "load obs.dll", runtime.error());
     return kExitFail;

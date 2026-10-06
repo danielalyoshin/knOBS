@@ -107,6 +107,7 @@ int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restar
   options.start_core = [](core::Observer& observer, const core::Settings& settings) {
     core::ObsBackendOptions backend;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
+    backend.prune_runtime = true;
     core::CoreOptions core_options;
     core_options.settings = settings;
     return core::Core::Start(std::make_unique<core::ObsBackend>(std::move(backend)), observer,

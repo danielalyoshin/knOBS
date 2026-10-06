@@ -12,6 +12,7 @@
 #include "audio/audio_devices.h"
 #include "runtime/obs_layout.h"
 #include "runtime/obs_version.h"
+#include "runtime/runtime_copy.h"
 #include "util/win_strings.h"
 
 namespace knobs::core {
@@ -36,11 +37,33 @@ Result<import::ActiveObsConfig> ReadOwnObsConfig(const fs::path& install_root) {
   return import::FindActiveObsConfig(*root);
 }
 
+// What pruning did, for the log. Nothing when there was nothing to prune.
+void LogPruned(const runtime::PrunedCopies& pruned, runtime::ObsLog& log) {
+  if (pruned.busy) {
+    log.Write(LOG_INFO,
+              "Another program was making or loading an OBS runtime copy, so old copies stay until next time.");
+    return;
+  }
+  if (!pruned.removed.empty()) {
+    std::string names;
+    for (const fs::path& folder : pruned.removed) {
+      names += std::format("{}{}", names.empty() ? "" : ", ", ToUtf8(folder.filename()));
+    }
+    log.Write(LOG_INFO, std::format("Removed OBS runtime copies no longer needed ({:.1f} MB): {}",
+                                    static_cast<double>(pruned.removed_bytes) / (1024 * 1024), names));
+  }
+  for (const runtime::PrunedCopies::Left& left : pruned.left) {
+    log.Write(LOG_INFO, std::format("Left {} for next time: {}", ToUtf8(left.folder), left.why));
+  }
+}
+
 }  // namespace
 
 ObsBackend::ObsBackend(ObsBackendOptions options) : options_(std::move(options)) {}
 
 ObsBackend::~ObsBackend() {
+  // It writes to host_'s log.
+  if (pruner_.joinable()) pruner_.join();
   StopChain();
   if (!host_) return;
   const long leaks = host_->Shutdown();
@@ -91,6 +114,13 @@ Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import:
   auto host = runtime::ObsHost::Start(options);
   if (!host) return Error{host.error()};
   host_ = std::move(*host);
+  if (options_.prune_runtime) {
+    // Now the copy in use is known and loaded. Off the core's thread, so the
+    // chain doesn't wait for 50 MB of deletes.
+    pruner_ = std::thread([base = host_->app_dirs().RuntimeBase(), keep = host_->copy().root, &log = host_->log()] {
+      LogPruned(runtime::PruneRuntimeCopies(base, keep), log);
+    });
+  }
   return Ok{};
 }
 

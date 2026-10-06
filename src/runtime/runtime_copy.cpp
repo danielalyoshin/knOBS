@@ -60,31 +60,6 @@ bool FlushToDisk(const fs::path& file) {
   return flushed;
 }
 
-// Serializes runtime copies across processes in this logon session, so two
-// knobs instances starting together can't clobber each other's staging folder.
-class CopyLock {
- public:
-  CopyLock() {
-    const std::wstring name = std::format(L"Local\\{}-runtime-copy", kDisplayNameW);
-    mutex_ = CreateMutexW(nullptr, FALSE, name.c_str());
-    // Best effort: without the mutex, copying still works for a single instance.
-    if (mutex_) {
-      const DWORD result = WaitForSingleObject(mutex_, INFINITE);
-      locked_ = result == WAIT_OBJECT_0 || result == WAIT_ABANDONED;
-    }
-  }
-  ~CopyLock() {
-    if (locked_) ReleaseMutex(mutex_);
-    if (mutex_) CloseHandle(mutex_);
-  }
-  CopyLock(const CopyLock&) = delete;
-  CopyLock& operator=(const CopyLock&) = delete;
-
- private:
-  HANDLE mutex_ = nullptr;
-  bool locked_ = false;
-};
-
 // DLLs in `dir`, keyed by lowercase file name.
 std::map<std::string, fs::path> ListDlls(const fs::path& dir) {
   std::map<std::string, fs::path> dlls;
@@ -180,20 +155,158 @@ Status WriteManifest(const fs::path& copy_root, const ObsInstall& install,
   return Ok{};
 }
 
-// Deletes <version>.old-* folders left by earlier swaps. Ones still in use
-// by a running knobs stay until a later copy.
-void RemoveRetiredCopies(const fs::path& runtime_base, const std::string& version) {
-  const std::string prefix = AsciiLower(version + ".old-");
-  std::error_code ec;
-  for (const auto& entry : fs::directory_iterator(runtime_base, ec)) {
-    if (AsciiLower(ToUtf8(entry.path().filename())).starts_with(prefix)) {
-      std::error_code ignored;
-      fs::remove_all(entry.path(), ignored);
+bool IsDigit(char c) { return c >= '0' && c <= '9'; }
+
+// A folder in the runtime base that knobs made, known by its name.
+struct CopyFolder {
+  enum Kind { kCopy, kStaging, kRetired };
+
+  fs::path path;
+  Kind kind = kCopy;
+  std::string version;  // "32.2.2"
+};
+
+// "32.2.2" is a copy, "32.2.2.partial" a copy being made, and
+// "32.2.2.old-<n>" a copy set aside. Any other name isn't knobs's.
+std::optional<CopyFolder> ParseCopyFolder(const fs::path& path) {
+  const std::string name = AsciiLower(ToUtf8(path.filename()));
+  size_t end = 0;
+  for (int part = 0; part < 3; ++part) {
+    if (part > 0) {
+      if (end == name.size() || name[end] != '.') return std::nullopt;
+      ++end;
     }
+    const size_t digits = end;
+    while (end < name.size() && IsDigit(name[end])) ++end;
+    if (end == digits) return std::nullopt;
+  }
+  CopyFolder folder{path, CopyFolder::kCopy, name.substr(0, end)};
+  constexpr std::string_view kRetiredMark = ".old-";
+  const std::string_view rest = std::string_view(name).substr(end);
+  if (rest == ".partial") {
+    folder.kind = CopyFolder::kStaging;
+  } else if (rest.starts_with(kRetiredMark) && rest.size() > kRetiredMark.size() &&
+             std::all_of(rest.begin() + kRetiredMark.size(), rest.end(), IsDigit)) {
+    folder.kind = CopyFolder::kRetired;
+  } else if (!rest.empty()) {
+    return std::nullopt;
+  }
+  return folder;
+}
+
+// The folders knobs made in the runtime base. Links are left out: knobs
+// makes none, and one could lead anywhere.
+std::vector<CopyFolder> ListCopyFolders(const fs::path& runtime_base) {
+  std::vector<CopyFolder> folders;
+  std::error_code ec;
+  for (auto it = fs::directory_iterator(runtime_base, ec); !ec && it != fs::directory_iterator();
+       it.increment(ec)) {
+    std::error_code status_error;
+    if (it->symlink_status(status_error).type() != fs::file_type::directory) continue;
+    if (auto folder = ParseCopyFolder(it->path())) folders.push_back(std::move(*folder));
+  }
+  return folders;
+}
+
+// An unused name to set a copy of `version` aside under: <version>.old-<n>.
+fs::path RetiredPath(const fs::path& runtime_base, const std::string& version) {
+  std::error_code ec;
+  for (uint64_t n = GetTickCount64();; ++n) {
+    fs::path path = runtime_base / FromUtf8(std::format("{}.old-{}", version, n));
+    if (!fs::exists(path, ec)) return path;
+  }
+}
+
+struct FolderCheck {
+  uint64_t bytes = 0;
+  std::string in_use;  // Why the folder can't go now, if it can't.
+};
+
+// Looks through a folder before it's removed: adds up its files, makes them
+// writable, and looks for a DLL a program has loaded from it. A loaded DLL
+// doesn't keep its folder from being renamed, but Windows won't open it for
+// writing, which the check tries without writing anything.
+FolderCheck CheckFolder(const fs::path& folder) {
+  FolderCheck check;
+  std::error_code ec;
+  for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator();
+       it.increment(ec)) {
+    // Links aren't followed, and only files are looked at.
+    const fs::file_type type = it->symlink_status(ec).type();
+    if (ec) break;
+    if (type != fs::file_type::regular) continue;
+    const uintmax_t size = it->file_size(ec);
+    if (ec) break;
+    check.bytes += size;
+    // The copies are knobs's own, and writable when made. A read-only file
+    // would look loaded, and might not delete.
+    const fs::path& file = it->path();
+    const DWORD attributes = GetFileAttributesW(file.c_str());
+    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY)) {
+      SetFileAttributesW(file.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+    }
+    if (AsciiLower(ToUtf8(file.extension())) != ".dll") continue;
+    HANDLE handle = CreateFileW(file.c_str(), FILE_WRITE_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) {
+      check.in_use = std::format("{} is in use: {}", ToObsPath(file.lexically_relative(folder)),
+                                 DescribeWinError(GetLastError()));
+      return check;
+    }
+    CloseHandle(handle);
+  }
+  if (ec) check.in_use = std::format("couldn't look through it: {}", Describe(ec));
+  return check;
+}
+
+// Removes a runtime copy, or a folder a copy left behind, unless a program
+// uses it. It's renamed aside first, which fails as a whole while a process
+// has a file open in it or works in it, and only what was renamed is
+// deleted, so a copy in use is never left half deleted. Says why the folder
+// stays, or nothing once it's gone. Call with the RuntimeCopyLock held, so
+// no process is between making a copy and loading it.
+std::optional<PrunedCopies::Left> RemoveCopyFolder(const fs::path& runtime_base, const CopyFolder& folder,
+                                                   uint64_t& bytes) {
+  const FolderCheck check = CheckFolder(folder.path);
+  if (!check.in_use.empty()) return PrunedCopies::Left{folder.path, check.in_use};
+  const fs::path retired = RetiredPath(runtime_base, folder.version);
+  std::error_code ec;
+  fs::rename(folder.path, retired, ec);
+  if (ec) {
+    return PrunedCopies::Left{
+        folder.path, std::format("couldn't set it aside, so a program may be using it: {}", Describe(ec))};
+  }
+  // What doesn't go now is a <version>.old-<n> folder, for next time.
+  fs::remove_all(retired, ec);
+  if (ec) return PrunedCopies::Left{retired, std::format("couldn't delete it: {}", Describe(ec))};
+  bytes = check.bytes;
+  return std::nullopt;
+}
+
+// Deletes <version>.old-<n> folders left by earlier swaps. Ones still in use
+// by a running knobs stay until later.
+void RemoveRetiredCopies(const fs::path& runtime_base, const std::string& version) {
+  for (const CopyFolder& folder : ListCopyFolders(runtime_base)) {
+    if (folder.kind != CopyFolder::kRetired || folder.version != version) continue;
+    uint64_t bytes = 0;
+    RemoveCopyFolder(runtime_base, folder, bytes);
   }
 }
 
 }  // namespace
+
+RuntimeCopyLock::RuntimeCopyLock(bool wait) {
+  const std::wstring name = std::format(L"Local\\{}-runtime-copy", kDisplayNameW);
+  mutex_ = CreateMutexW(nullptr, FALSE, name.c_str());
+  if (!mutex_) return;
+  const DWORD result = WaitForSingleObject(mutex_, wait ? INFINITE : 0);
+  locked_ = result == WAIT_OBJECT_0 || result == WAIT_ABANDONED;
+}
+
+RuntimeCopyLock::~RuntimeCopyLock() {
+  if (locked_) ReleaseMutex(mutex_);
+  if (mutex_) CloseHandle(mutex_);
+}
 
 Result<RuntimeFileSet> PlanRuntimeCopy(const fs::path& install_root) {
   const fs::path bin = BinDir(install_root);
@@ -275,7 +388,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   const std::string version = install.version.ToString();
   if (!IsSupportedObsVersion(install.version)) return Error{UnsupportedObsMessage(version)};
 
-  const CopyLock lock;
+  const RuntimeCopyLock lock;
   const fs::path target = runtime_base / FromUtf8(version);
   if (!force) {
     if (auto intact = ReadIntactManifest(target, install)) {
@@ -315,10 +428,11 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
 
   // Move the old copy aside rather than deleting it: the rename fails as a
   // whole while a running knobs has it loaded, instead of half-deleting it.
+  // Its loaded DLLs alone wouldn't stop the rename, but libobs works in the
+  // copy's bin\64bit (ObsRuntime::Load), and that does.
   RemoveRetiredCopies(runtime_base, version);
   const bool replacing = fs::exists(target, ec);
-  const fs::path retired =
-      runtime_base / FromUtf8(std::format("{}.old-{}", version, GetTickCount64()));
+  const fs::path retired = RetiredPath(runtime_base, version);
   if (replacing) {
     fs::rename(target, retired, ec);
     if (ec) {
@@ -341,6 +455,29 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   }
   RemoveRetiredCopies(runtime_base, version);
   return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes};
+}
+
+PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& keep) {
+  PrunedCopies pruned;
+  // Held by a process making a copy, which uses its staging folder, or about
+  // to load one.
+  const RuntimeCopyLock lock(false);
+  if (!lock.locked()) {
+    pruned.busy = true;
+    return pruned;
+  }
+  const std::string kept = AsciiLower(ToUtf8(keep.filename()));
+  for (const CopyFolder& folder : ListCopyFolders(runtime_base)) {
+    if (folder.kind == CopyFolder::kCopy && folder.version == kept) continue;
+    uint64_t bytes = 0;
+    if (auto left = RemoveCopyFolder(runtime_base, folder, bytes)) {
+      pruned.left.push_back(std::move(*left));
+    } else {
+      pruned.removed.push_back(folder.path);
+      pruned.removed_bytes += bytes;
+    }
+  }
+  return pruned;
 }
 
 }  // namespace knobs::runtime

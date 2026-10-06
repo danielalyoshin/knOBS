@@ -7,6 +7,7 @@
 #include <memory>
 #include <string>
 #include <string_view>
+#include <thread>
 
 #include "audio/live_chain.h"
 #include "core/backend.h"
@@ -25,6 +26,11 @@ struct ObsBackendOptions {
   // Read Settings::mic as the tools' --pick: a number or a name
   // (import::PickMic). Otherwise it's a name, as the tray saves it.
   bool pick_by_number = false;
+  // Once libobs has started, remove the runtime copies and leftovers no
+  // process uses, on a thread of its own (runtime::PruneRuntimeCopies). The
+  // app turns it on. Off, tests and tools leave %LocalAppData%\knobs\runtime
+  // as it is.
+  bool prune_runtime = false;
 };
 
 // The real thing: the user's OBS install and settings, libobs from its
@@ -34,7 +40,7 @@ struct ObsBackendOptions {
 class ObsBackend : public Backend {
  public:
   explicit ObsBackend(ObsBackendOptions options);
-  // Stops the chain and shuts libobs down.
+  // Waits for pruning to finish, stops the chain and shuts libobs down.
   ~ObsBackend() override;
 
   ObsCheck CheckObs(const Settings& settings) override;
@@ -61,6 +67,9 @@ class ObsBackend : public Backend {
   std::unique_ptr<runtime::ObsHost> host_;
   std::unique_ptr<audio::LiveChain> chain_;
   std::atomic<uint64_t> packets_ = 0;
+  // Prunes runtime copies, writing to host_'s log. Only the file system and
+  // the log, which is thread-safe.
+  std::thread pruner_;
 };
 
 }  // namespace knobs::core

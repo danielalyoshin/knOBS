@@ -4,6 +4,7 @@
 // installed, and the test runner. The core's tests are in core_tests.cpp.
 
 #include <windows.h>
+#include <winioctl.h>
 
 #include <algorithm>
 #include <chrono>
@@ -13,8 +14,10 @@
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <future>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <vector>
 
 #include "audio/audio_devices.h"
@@ -262,6 +265,197 @@ TEST(EnsureRefusesUnsupportedVersions) {
     CHECK(!copy.ok() && copy.error().find("isn't supported") != std::string::npos);
   }
   CHECK(!fs::exists(base) || fs::is_empty(base));
+}
+
+// --- Pruning runtime copies ----------------------------------------------------
+
+// A runtime copy as EnsureRuntimeCopy lays it out, in miniature: 29 bytes.
+fs::path MakeCopy(const fs::path& folder) {
+  WriteFile(folder / L"bin" / L"64bit" / L"obs.dll", "MZ fake");
+  WriteFile(folder / L"data" / L"libobs" / L"default.effect", "effect");
+  WriteFile(folder / L"knobs-runtime.txt", "knobs-runtime 2\n");
+  return folder;
+}
+
+std::vector<std::wstring> Names(const fs::path& dir) {
+  std::vector<std::wstring> names;
+  for (const auto& entry : fs::directory_iterator(dir)) names.push_back(entry.path().filename().native());
+  std::sort(names.begin(), names.end());
+  return names;
+}
+
+bool IsWhole(const fs::path& copy) {
+  return fs::exists(copy / L"bin" / L"64bit" / L"obs.dll") &&
+         fs::exists(copy / L"data" / L"libobs" / L"default.effect") && fs::exists(copy / L"knobs-runtime.txt");
+}
+
+// A directory junction at `link` to `target`. Unlike a symbolic link, it
+// needs no privilege. Its reparse data is REPARSE_DATA_BUFFER's mount point
+// form (ntifs.h): the header, then the four name offsets and lengths, then
+// the substitute name and the print name, each ending in a null.
+bool MakeJunction(const fs::path& link, const fs::path& target) {
+  std::error_code ec;
+  if (!fs::create_directories(link, ec)) return false;
+  const std::wstring print = fs::absolute(target).native();
+  const std::wstring substitute = L"\\??\\" + print;
+  const size_t names = (substitute.size() + 1 + print.size() + 1) * sizeof(wchar_t);
+  std::vector<uint8_t> buffer(16 + names);
+  const auto put16 = [&buffer](size_t at, size_t value) {
+    const uint16_t v = static_cast<uint16_t>(value);
+    std::memcpy(buffer.data() + at, &v, sizeof(v));
+  };
+  const DWORD tag = IO_REPARSE_TAG_MOUNT_POINT;
+  std::memcpy(buffer.data(), &tag, sizeof(tag));
+  put16(4, 8 + names);  // The reparse data's length, after the 8-byte header.
+  put16(8, 0);
+  put16(10, substitute.size() * sizeof(wchar_t));
+  put16(12, (substitute.size() + 1) * sizeof(wchar_t));
+  put16(14, print.size() * sizeof(wchar_t));
+  std::memcpy(buffer.data() + 16, substitute.c_str(), (substitute.size() + 1) * sizeof(wchar_t));
+  std::memcpy(buffer.data() + 16 + (substitute.size() + 1) * sizeof(wchar_t), print.c_str(),
+              (print.size() + 1) * sizeof(wchar_t));
+  const HANDLE handle = CreateFileW(link.c_str(), GENERIC_WRITE, 0, nullptr, OPEN_EXISTING,
+                                    FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT, nullptr);
+  if (handle == INVALID_HANDLE_VALUE) return false;
+  DWORD returned = 0;
+  const bool made = DeviceIoControl(handle, FSCTL_SET_REPARSE_POINT, buffer.data(), static_cast<DWORD>(buffer.size()),
+                                    nullptr, 0, &returned, nullptr);
+  CloseHandle(handle);
+  return made;
+}
+
+TEST(PruneRemovesOldCopiesAndLeftovers) {
+  TempDir dir(L"prune");
+  const fs::path base = dir.path / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  MakeCopy(base / L"32.2.0");
+  MakeCopy(base / L"32.2.1");
+  MakeCopy(base / L"32.2.2.old-123");  // Set aside when 32.2.2 was replaced.
+  MakeCopy(base / L"32.2.1.old-45");
+  WriteFile(base / L"32.2.3.partial" / L"bin" / L"64bit" / L"obs.dll", "interrupted");
+  // The copier never leaves a file read-only, but one still goes.
+  SetFileAttributesW((base / L"32.2.0" / L"bin" / L"64bit" / L"obs.dll").c_str(), FILE_ATTRIBUTE_READONLY);
+
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  CHECK(!pruned.busy);
+  CHECK(pruned.left.empty());
+  CHECK(pruned.removed.size() == 5);
+  CHECK(ContainsPath(pruned.removed, base / L"32.2.3.partial"));
+  CHECK(pruned.removed_bytes == 4 * 29 + 11);
+  CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
+  CHECK(IsWhole(keep));
+
+  const PrunedCopies again = PruneRuntimeCopies(base, keep);
+  CHECK(again.removed.empty() && again.left.empty() && IsWhole(keep));
+}
+
+TEST(PruneLeavesCopiesInUseForLater) {
+  TempDir dir(L"prune-in-use");
+  const fs::path base = dir.path / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  // A DLL loaded from it, as another knobs runs an older OBS. A copy of this
+  // test binary stands in, as it does for obs.dll above. A loaded DLL alone
+  // doesn't stop its folder from being renamed.
+  const fs::path loaded = MakeCopy(base / L"32.2.0");
+  const fs::path dll = loaded / L"obs-plugins" / L"64bit" / L"obs-filters.dll";
+  fs::create_directories(dll.parent_path());
+  fs::copy_file(SelfPath(), dll);
+  const HMODULE module = LoadLibraryExW(dll.c_str(), nullptr, 0);
+  CHECK(module != nullptr);
+  // A file held open without FILE_SHARE_DELETE.
+  const fs::path open = MakeCopy(base / L"32.2.1");
+  const HANDLE file = CreateFileW((open / L"data" / L"libobs" / L"default.effect").c_str(), GENERIC_READ,
+                                  FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  CHECK(file != INVALID_HANDLE_VALUE);
+  // A working directory in it, as libobs has in its copy's bin\64bit.
+  const fs::path working = MakeCopy(base / L"32.2.3");
+  const fs::path before = fs::current_path();
+  std::error_code ec;
+  fs::current_path(working / L"bin" / L"64bit", ec);
+  CHECK(!ec);
+
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  fs::current_path(before, ec);
+  CHECK(!pruned.busy);
+  CHECK(pruned.removed.empty());
+  CHECK(pruned.left.size() == 3);
+  for (const PrunedCopies::Left& left : pruned.left) {
+    if (left.folder == loaded) CHECK(left.why.starts_with("obs-plugins/64bit/obs-filters.dll is in use"));
+  }
+  // Each stays whole, under its own name.
+  CHECK(Names(base) == (std::vector<std::wstring>{L"32.2.0", L"32.2.1", L"32.2.2", L"32.2.3"}));
+  CHECK(IsWhole(loaded) && fs::exists(dll) && IsWhole(open) && IsWhole(working) && IsWhole(keep));
+
+  // Next time, once nothing uses them, they go.
+  if (module) FreeLibrary(module);
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  const PrunedCopies later = PruneRuntimeCopies(base, keep);
+  CHECK(later.left.empty() && later.removed.size() == 3);
+  CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
+}
+
+TEST(PruneLeavesEverythingWhileACopyIsMade) {
+  TempDir dir(L"prune-busy");
+  const fs::path base = dir.path / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  MakeCopy(base / L"32.2.1");
+  WriteFile(base / L"32.2.3.partial" / L"bin" / L"64bit" / L"obs.dll", "being copied");
+  // Another process making a copy holds the lock. A thread stands in for it:
+  // the thread that holds the lock could take it again.
+  std::promise<void> locked;
+  std::promise<void> copied;
+  std::thread copier([&locked, done = copied.get_future()] {
+    const RuntimeCopyLock lock;
+    locked.set_value();
+    done.wait();
+  });
+  locked.get_future().wait();
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  copied.set_value();
+  copier.join();
+  CHECK(pruned.busy);
+  CHECK(pruned.removed.empty() && pruned.left.empty());
+  CHECK(Names(base) == (std::vector<std::wstring>{L"32.2.1", L"32.2.2", L"32.2.3.partial"}));
+
+  const PrunedCopies after = PruneRuntimeCopies(base, keep);
+  CHECK(!after.busy && after.removed.size() == 2);
+  CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
+}
+
+TEST(PruneTouchesOnlyItsOwnFolders) {
+  TempDir dir(L"prune-others");
+  const fs::path local = dir.path / L"local";  // As %LocalAppData%\knobs.
+  const fs::path base = local / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  MakeCopy(base / L"32.2.1");
+  // Names knobs doesn't give, and a file named like a copy.
+  const std::vector<std::wstring> foreign = {L"32.2",        L"32.2.1-mine",   L"33.0.0-beta6",
+                                             L"32.2.1.old-", L"32.2.1.old-7a", L"32.2.1.tmp"};
+  for (const std::wstring& name : foreign) MakeCopy(base / name);
+  WriteFile(base / L"32.2.0", "a file");
+  WriteFile(base / L"notes.txt", "mine");
+  // Next to the runtime folder: knobs-compare's copy of OBS, the logs, and a
+  // copy's name outside it.
+  MakeCopy(local / L"compare" / L"obs-32.2.1");
+  WriteFile(local / L"logs" / L"core 2026-10-05.txt", "log");
+  MakeCopy(local / L"32.2.0");
+  // Links lead elsewhere, and aren't followed: one named like a copy, and one
+  // inside a copy that goes.
+  const fs::path elsewhere = MakeCopy(dir.path / L"elsewhere");
+  CHECK(MakeJunction(base / L"32.1.0", elsewhere));
+  CHECK(MakeJunction(base / L"32.2.1" / L"data" / L"elsewhere", elsewhere));
+  CHECK(IsWhole(base / L"32.1.0"));
+
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  CHECK(pruned.left.empty());
+  CHECK(pruned.removed == std::vector<fs::path>{base / L"32.2.1"});
+  std::vector<std::wstring> expected = foreign;
+  expected.insert(expected.end(), {L"32.1.0", L"32.2.0", L"32.2.2", L"notes.txt"});
+  std::sort(expected.begin(), expected.end());
+  CHECK(Names(base) == expected);
+  for (const std::wstring& name : foreign) CHECK(IsWhole(base / name));
+  CHECK(IsWhole(local / L"compare" / L"obs-32.2.1") && IsWhole(local / L"32.2.0") && IsWhole(elsewhere));
+  CHECK(fs::exists(local / L"logs" / L"core 2026-10-05.txt"));
 }
 
 // --- Runtime load --------------------------------------------------------------
