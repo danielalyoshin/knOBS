@@ -57,6 +57,17 @@ struct ChainPlan {
   }
 };
 
+// How loud a running chain's output has been since the last look, from the
+// peak of each packet it filtered (10 ms each from win-wasapi), as the monitor
+// plays it: after the source's volume. 1 is full scale.
+struct ChainLevel {
+  // What the packets stayed at or below, leaving out the loudest tenth of
+  // them, so a click or a short breath doesn't count.
+  float typical = 0;
+  // The loudest of the last few packets: what's playing now.
+  float latest = 0;
+};
+
 // Everything the Controller needs from the world: OBS's install and
 // settings, libobs, and the audio devices. Unit tests fake it. Every call,
 // destruction included, comes from one thread, and libobs runs on it.
@@ -87,10 +98,9 @@ class Backend {
   // Audio packets the running chain has filtered since it started. Silence
   // counts: win-wasapi passes silent packets on as zeros.
   virtual uint64_t ChainPackets() = 0;
-  // The loudest sample the running chain has sent to the monitor since the
-  // last call (or since it started), as the monitor plays it: after the
-  // source's volume. 1 is full scale.
-  virtual float TakeChainPeak() = 0;
+  // How loud the running chain's output has been since the last call, or
+  // since it started.
+  virtual ChainLevel TakeChainLevel() = 0;
   // Opens the running chain's monitor stream afresh, dropping the audio it
   // had queued, so the delay to the cable starts again from the least. The
   // chain keeps running; the packets that come meanwhile are lost (plan.md,

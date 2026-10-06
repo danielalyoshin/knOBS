@@ -96,9 +96,10 @@ struct FakeBackend : Backend {
   std::optional<std::string> chain_error;
   // Whether the running chain gets audio.
   bool flowing = true;
-  // The loudest sample the running chain sends to the monitor, each time
-  // it's asked.
-  float peak = 0;
+  // The running chain's typical level each time it's asked, and its latest,
+  // when that's different.
+  float level = 0;
+  std::optional<float> latest;
 
   int libobs_starts = 0;
   import::ProfileAudio libobs_audio;
@@ -186,10 +187,10 @@ struct FakeBackend : Backend {
     if (flowing) packets += 100;
     return packets;
   }
-  float TakeChainPeak() override {
+  ChainLevel TakeChainLevel() override {
     Called();
     CHECK(chain_running);
-    return peak;
+    return {level, latest.value_or(level)};
   }
   void RestartMonitor() override {
     Called();
@@ -651,10 +652,11 @@ TEST(CoreTimesTheWatchdogFromTheChainsStart) {
   CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
 }
 
-// Peaks of the chain's output, each second.
+// Typical levels of the chain's output, each second.
 constexpr float kVoice = 0.2f;           // -14 dBFS
 constexpr float kExpanded = 0.0004f;     // -68 dBFS: an expander between words
 constexpr float kRoomNoise = 0.0063f;    // -44 dBFS: no gate, the mic's noise floor
+constexpr float kNoisyFloor = 0.0224f;   // -33 dBFS
 constexpr float kLoudFloor = 0.05f;      // -26 dBFS
 
 const Clock::duration kRestartEvery = Controller::Timing{}.monitor_restart_every;
@@ -664,29 +666,29 @@ const Clock::duration kRestartEvery = Controller::Timing{}.monitor_restart_every
 void Talk(Fixture& f, Clock::duration total, Clock::duration words, Clock::duration pause, float floor,
           float voice = kVoice) {
   for (Clock::duration done{}; done < total; done += words + pause) {
-    f.backend.peak = voice;
+    f.backend.level = voice;
     f.Advance(words);
-    f.backend.peak = floor;
+    f.backend.level = floor;
     f.Advance(pause);
   }
 }
 
 TEST(CoreRestartsTheMonitorInSilence) {
   Fixture f;
-  f.backend.peak = kVoice;
+  f.backend.level = kVoice;
   f.controller.Start(false, f.now);
   // Never while there's sound, however long.
   f.Advance(45min);
   CHECK(f.backend.monitor_restarts == 0);
   // Once it's due, after 3 s of silence.
-  f.backend.peak = kExpanded;
+  f.backend.level = kExpanded;
   f.Advance(2s);
   CHECK(f.backend.monitor_restarts == 0);
   f.Advance(1s);
   CHECK(f.backend.monitor_restarts == 1);
   // No sooner than Timing::monitor_restart_every after the last, however
   // silent. Digital silence too, from a gate.
-  f.backend.peak = 0;
+  f.backend.level = 0;
   f.Advance(kRestartEvery - 1min);
   CHECK(f.backend.monitor_restarts == 1);
   f.Advance(1min);
@@ -710,21 +712,72 @@ TEST(CoreRestartsTheMonitorOfAMicWithoutAGate) {
   CHECK(f.backend.monitor_restarts == 0);
   Talk(f, 2min, 20s, 5s, kRoomNoise);
   CHECK(f.backend.monitor_restarts == 1);
-  // Sound less than 6 dB over the floor counts as silence...
-  f.backend.peak = kRoomNoise * 1.5f;
-  f.Advance(kRestartEvery + 1min);
+  // Sound less than 6 dB over the floor counts as silence, with the floor
+  // still heard in short pauses...
+  Talk(f, kRestartEvery + 1min, 20s, 1s, kRoomNoise, kRoomNoise * 1.5f);
   CHECK(f.backend.monitor_restarts == 2);
   // ...but a softer voice than that doesn't.
   Talk(f, 40min, 20s, 1s, kRoomNoise, kRoomNoise * 2.5f);
   CHECK(f.backend.monitor_restarts == 2);
 
-  // A floor above -36 dBFS is never quiet enough: the delay grows until the
-  // monitor's buffer overflows, which libobs answers with a restart of its
-  // own.
+  // The bar is never above -30 dBFS. A floor of -33 dBFS still gets restarts
+  // in its pauses...
+  Fixture noisy;
+  noisy.controller.Start(false, noisy.now);
+  Talk(noisy, kRestartEvery + 2min, 20s, 5s, kNoisyFloor);
+  CHECK(noisy.backend.monitor_restarts == 1);
+  // ...but a mic that never gets down to -30 dBFS isn't restarted: the delay
+  // grows until the monitor's buffer overflows, which libobs answers with a
+  // restart of its own.
   Fixture loud;
   loud.controller.Start(false, loud.now);
   Talk(loud, 2h, 20s, 5s, kLoudFloor);
   CHECK(loud.backend.monitor_restarts == 0);
+}
+
+TEST(CoreRestartsTheMonitorOnlyWhileItsQuietNow) {
+  Fixture f;
+  f.backend.level = kVoice;
+  f.controller.Start(false, f.now);
+  f.Advance(kRestartEvery + 1min);
+  // Quiet seconds, but each ends loud: a word may be starting.
+  f.backend.level = kExpanded;
+  f.backend.latest = kVoice;
+  f.Advance(5s);
+  CHECK(f.backend.monitor_restarts == 0);
+  // Those seconds still count as silence, so once it's quiet now, the next
+  // check restarts.
+  f.backend.latest.reset();
+  f.Advance(1s);
+  CHECK(f.backend.monitor_restarts == 1);
+}
+
+TEST(ChainLevelLeavesOutTheLoudestTenth) {
+  constexpr float kQuiet = 0.001f;
+  constexpr float kLoud = 0.5f;
+  CHECK(SummarizeChainLevel({}).typical == 0 && SummarizeChainLevel({}).latest == 0);
+
+  // A second of packets with a 100 ms click in the middle: typical and
+  // latest are quiet.
+  std::vector<float> second(100, kQuiet);
+  std::fill(second.begin() + 40, second.begin() + 50, kLoud);
+  ChainLevel level = SummarizeChainLevel(second);
+  CHECK(level.typical == kQuiet && level.latest == kQuiet);
+  // 110 ms is more than a tenth.
+  second[50] = kLoud;
+  CHECK(SummarizeChainLevel(second).typical == kLoud);
+
+  // A sound in the last 200 ms is the latest, whatever the typical level.
+  std::vector<float> ending(100, kQuiet);
+  ending[80] = kLoud;
+  level = SummarizeChainLevel(ending);
+  CHECK(level.typical == kQuiet && level.latest == kLoud);
+  ending[80] = kQuiet;
+  ending[79] = kLoud;
+  CHECK(SummarizeChainLevel(ending).latest == kQuiet);
+
+  // Fewer than ten packets leave none out.
+  CHECK(SummarizeChainLevel({kQuiet, kLoud, kQuiet}).typical == kLoud);
 }
 
 TEST(CoreTimesMonitorRestartsFromTheChainsStart) {

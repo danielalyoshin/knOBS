@@ -5,9 +5,11 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "audio/live_chain.h"
 #include "core/backend.h"
@@ -33,6 +35,11 @@ struct ObsBackendOptions {
   bool prune_runtime = false;
 };
 
+// Sums up the peaks of the packets a chain filtered, oldest first. The
+// typical level leaves out the loudest tenth; the latest is the loudest of
+// the last 20 (200 ms of win-wasapi's).
+ChainLevel SummarizeChainLevel(std::vector<float> packet_peaks);
+
 // The real thing: the user's OBS install and settings, libobs from its
 // runtime copy (runtime::ObsHost), and the chain (audio::LiveChain). libobs
 // starts on the thread that calls StartLibobs, and the destructor, which
@@ -52,7 +59,7 @@ class ObsBackend : public Backend {
   Status StartChain(const ChainPlan& plan) override;
   void StopChain() override;
   uint64_t ChainPackets() override;
-  float TakeChainPeak() override;
+  ChainLevel TakeChainLevel() override;
   void RestartMonitor() override;
   void Log(std::string_view line) override;
 
@@ -61,15 +68,21 @@ class ObsBackend : public Backend {
   runtime::ObsHost* host() { return host_.get(); }
 
  private:
-  // A capture callback on the chain: counts what it filters and keeps the
-  // peak. It only reads the samples.
+  // A capture callback on the chain: counts what it filters and keeps each
+  // packet's peak. It only reads the samples.
   static void OnChainAudio(void* param, obs_source_t* source, const audio_data* audio, bool muted);
 
   ObsBackendOptions options_;
   std::unique_ptr<runtime::ObsHost> host_;
   std::unique_ptr<audio::LiveChain> chain_;
   std::atomic<uint64_t> packets_ = 0;
-  std::atomic<float> peak_ = 0;  // Before the volume.
+  std::mutex level_mutex_;
+  // Each packet's peak since the last TakeChainLevel, oldest first, before
+  // the volume. Guarded by level_mutex_.
+  std::vector<float> packet_peaks_;
+  // TakeChainLevel's, swapped with packet_peaks_ so the callback doesn't
+  // allocate once both have grown.
+  std::vector<float> taken_peaks_;
   // The chain's volume, which the monitor applies after the capture
   // callbacks. knobs never changes it while the chain runs.
   float volume_ = 1;

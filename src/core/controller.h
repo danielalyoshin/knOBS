@@ -128,10 +128,10 @@ class Controller {
   void StopChain();
   // Forgets failures, so the next Reconcile tries again.
   void ClearFailures();
-  // Hears the running chain's peak since the last watchdog check, and
-  // restarts the monitor once that's due and the output has been silent
-  // long enough.
-  void FollowLevel(float peak, Clock::time_point now);
+  // Hears the running chain's level since the last watchdog check, and
+  // restarts the monitor once that's due, the output has been silent long
+  // enough and it's silent now.
+  void FollowLevel(const ChainLevel& level, Clock::time_point now);
   bool MicIsDefault() const;
   bool MicPresent() const;
   bool CablePresent() const;
@@ -183,7 +183,7 @@ class Controller {
   Clock::time_point monitor_since_;  // When the chain started or the monitor last restarted.
   bool monitor_restarted_ = false;   // Since the chain started.
   Clock::time_point last_sound_;     // The last check that heard more than silence.
-  std::deque<float> peaks_;          // Each check's peak over Timing::noise_floor_window, newest last.
+  std::deque<float> levels_;         // Each check's typical level over Timing::noise_floor_window.
 };
 
 }  // namespace knobs::core

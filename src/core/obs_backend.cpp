@@ -32,6 +32,11 @@ Result<runtime::ObsInstall> FindInstalledObs() {
   return runtime::FindObsInstall(candidates);
 }
 
+// ChainLevel::latest: 200 ms of win-wasapi's 10 ms packets.
+constexpr size_t kLatestPackets = 20;
+// Enough for a minute of packets, in case the core's thread stops asking.
+constexpr size_t kMaxPackets = 6000;
+
 // What pruning did, for the log. Nothing when there was nothing to prune.
 void LogPruned(const runtime::PrunedCopies& pruned, runtime::ObsLog& log) {
   if (pruned.busy) {
@@ -56,6 +61,18 @@ void LogPruned(const runtime::PrunedCopies& pruned, runtime::ObsLog& log) {
 }
 
 }  // namespace
+
+ChainLevel SummarizeChainLevel(std::vector<float> packet_peaks) {
+  ChainLevel level;
+  if (packet_peaks.empty()) return level;
+  const size_t latest = std::min(packet_peaks.size(), kLatestPackets);
+  level.latest = *std::max_element(packet_peaks.end() - latest, packet_peaks.end());
+  // One packet in ten, rounded down, is left out.
+  const auto typical = packet_peaks.end() - 1 - packet_peaks.size() / 10;
+  std::nth_element(packet_peaks.begin(), typical, packet_peaks.end());
+  level.typical = *typical;
+  return level;
+}
 
 ObsBackend::ObsBackend(ObsBackendOptions options) : options_(std::move(options)) {}
 
@@ -163,7 +180,10 @@ Status ObsBackend::StartChain(const ChainPlan& plan) {
   if (!chain) return Error{chain.error()};
   chain_ = std::move(*chain);
   packets_ = 0;
-  peak_ = 0;
+  {
+    std::lock_guard lock(level_mutex_);
+    packet_peaks_.clear();
+  }
   volume_ = api.obs_source_get_volume(chain_->source());
   api.obs_source_add_audio_capture_callback(chain_->source(), OnChainAudio, this);
   return Ok{};
@@ -177,7 +197,17 @@ void ObsBackend::StopChain() {
 
 uint64_t ObsBackend::ChainPackets() { return packets_.load(std::memory_order_relaxed); }
 
-float ObsBackend::TakeChainPeak() { return peak_.exchange(0, std::memory_order_relaxed) * volume_; }
+ChainLevel ObsBackend::TakeChainLevel() {
+  taken_peaks_.clear();
+  {
+    std::lock_guard lock(level_mutex_);
+    taken_peaks_.swap(packet_peaks_);
+  }
+  ChainLevel level = SummarizeChainLevel(taken_peaks_);
+  level.typical *= volume_;
+  level.latest *= volume_;
+  return level;
+}
 
 void ObsBackend::RestartMonitor() {
   if (chain_) chain_->RestartMonitor();
@@ -197,9 +227,10 @@ void ObsBackend::OnChainAudio(void* param, obs_source_t*, const audio_data* audi
     const float* samples = reinterpret_cast<const float*>(audio->data[c]);
     for (uint32_t i = 0; i < audio->frames; ++i) peak = std::max(peak, std::fabs(samples[i]));
   }
-  float seen = backend->peak_.load(std::memory_order_relaxed);
-  while (peak > seen && !backend->peak_.compare_exchange_weak(seen, peak, std::memory_order_relaxed)) {
-  }
+  std::lock_guard lock(backend->level_mutex_);
+  std::vector<float>& peaks = backend->packet_peaks_;
+  if (peaks.size() >= kMaxPackets) peaks.erase(peaks.begin(), peaks.begin() + kMaxPackets / 2);
+  peaks.push_back(peak);
 }
 
 }  // namespace knobs::core
