@@ -16,6 +16,7 @@
 #include "app_info.h"
 #include "tray/message_dialog.h"
 #include "tray/open_obs.h"
+#include "tray/resource.h"
 #include "tray/settings_file.h"
 #include "util/win_strings.h"
 #include "version.h"
@@ -281,17 +282,24 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
 void TrayApp::LoadIcons() {
   DestroyIcons();
   const HICON small = LoadAppIcon(options_.instance, LIM_SMALL);
-  const HICON large = LoadAppIcon(options_.instance, LIM_LARGE);
+  // Windows 11 draws a notification's icon about 50 px wide at 100%, and
+  // resamples whatever it's given. Twice that is sharpest: an icon that size
+  // or a little bigger blurs, and a much bigger one comes out jagged.
+  const int size = MulDiv(2 * 48, static_cast<int>(GetDpiForSystem()), 96);
+  HICON notification = nullptr;
+  if (FAILED(LoadIconWithScaleDown(options_.instance, MAKEINTRESOURCEW(IDI_KNOBS), size, size, &notification))) {
+    notification = nullptr;
+  }
   for (const Badge badge : kBadges) {
     icons_[static_cast<size_t>(badge)] = BadgedIcon(small, badge);
-    large_icons_[static_cast<size_t>(badge)] = BadgedIcon(large, badge);
+    notification_icons_[static_cast<size_t>(badge)] = BadgedIcon(notification, badge);
   }
   if (small) DestroyIcon(small);
-  if (large) DestroyIcon(large);
+  if (notification) DestroyIcon(notification);
 }
 
 void TrayApp::DestroyIcons() {
-  for (std::array<HICON, 3>* icons : {&icons_, &large_icons_}) {
+  for (std::array<HICON, 3>* icons : {&icons_, &notification_icons_}) {
     for (HICON& icon : *icons) {
       if (icon) DestroyIcon(icon);
       icon = nullptr;
@@ -372,7 +380,7 @@ void TrayApp::ShowBalloon(const Notice& notice) {
   // The knob, with the badge for a problem, rather than one of Windows'
   // icons.
   data.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON | (notice.sound ? 0u : NIIF_NOSOUND);
-  data.hBalloonIcon = large_icons_[static_cast<size_t>(notice.problem ? Badge::kAttention : Badge::kNone)];
+  data.hBalloonIcon = notification_icons_[static_cast<size_t>(notice.problem ? Badge::kAttention : Badge::kNone)];
   Shell_NotifyIconW(NIM_MODIFY, &data);
 }
 

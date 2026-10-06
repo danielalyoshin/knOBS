@@ -147,9 +147,9 @@ class TrayApp final : public core::Observer, private FirstRunHost {
 
   TrayOptions options_;
   HWND window_ = nullptr;
-  // By Badge: small for the tray, large for notifications.
+  // By Badge: small for the tray, and at notifications' size.
   std::array<HICON, 3> icons_ = {};
-  std::array<HICON, 3> large_icons_ = {};
+  std::array<HICON, 3> notification_icons_ = {};
   Badge badge_ = Badge::kNone;
   UINT taskbar_created_ = 0;
   bool icon_added_ = false;
