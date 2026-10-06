@@ -319,6 +319,42 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 - **Trying libobs again in the same process.** A start that fails before any module DLL loads can be tried again: obs.dll unloads (measured: start, reset audio, shut down and free, then a fresh start works with 0 leaks). Once a module has loaded, it and obs.dll stay loaded (measured; `free_module` never unloads, obs-module.c), so the failure is "stopped after an error", and trying again restarts knobs (`Backend::LibobsCanRetry`). Reporting a restart at once would loop on a failure that repeats, since the tray restarts by itself.
 - **Cost of the core**, Release, dry, 60 s runs: 0.10–0.18% of a core without watching for OBS, 17–18 MB working set. Runs with the watch varied more than the watch costs (0.26–0.39%) while other programs ran, so the watch was measured on its own (above). libobs starts and imports in about 30 ms once the runtime copy exists.
 
+### M3 test on real hardware (OBS 32.2.2)
+
+Run on 2026-10-06 with `knobs.exe` (Release) on Daniel's PC: the Audient iD4, VB-Cable, Discord, and OBS 32.2.2 monitoring Mic/Aux to CABLE In 16ch, the cable knobs sends to. Daniel clicked, spoke and listened. Two watchers ran alongside knobs: one listed the audio sessions on the VB-Cable endpoints every 50 ms (`IAudioSessionManager2`: each session's process, state and peak), and one checked for OBS's mutex every 2 ms.
+
+- **Setup.** With no settings, knobs.exe opened the first run. The first door went straight to the last page, and Done wrote the Run entry, `"…\build\x64\Release\knobs.exe" --startup`. The chain loaded 40 ms after knobs started, and its stream on the cable was active 54 ms later.
+- **The daily path (§7, 2).** The voice reached CABLE Output at −13 to −18 dBFS peaks, and −64 to −80 dBFS between words, where the expander works. Discord read the level knobs sent within 0.1 dB, and its mic test sounded right.
+- **Same sound.** Discord's mic test with knobs, then with OBS open (knobs paused, OBS feeding the cable), then knobs again: the same by ear, as M2's bit-identical output predicts.
+- **No doubling (§7, 4).** OBS opened and closed six times, once closed as soon as its window appeared. No two processes were ever active on the cable at once, and no echo was heard. knobs let go of the cable before OBS opened its monitor (`[Loaded global audio device]: 'Mic/Aux'` in OBS's log):
+
+  | Open | knobs saw OBS (after its first log line) | knobs off the cable | OBS on the cable | Gap |
+  |---|---|---|---|---|
+  | 1 (cold) | 0.89 s | 01:00:21.898 | 01:00:23.350 | 1.45 s |
+  | 2 | 0.02 s | 01:03:04.066 | 01:03:05.506 | 1.44 s |
+  | 3 | 0.60 s | 01:03:34.074 | 01:03:34.894 | 0.82 s |
+  | 4 | 0.69 s | 01:03:51.084 | 01:03:51.844 | 0.76 s |
+  | 5 (quick) | 0.35 s | 01:04:10.113 | 01:04:11.242 | 1.13 s |
+  | 6 | 0.09 s | 01:10:10.475 | 01:10:11.861 | 1.39 s |
+
+  Pausing takes under 60 ms from seeing OBS to the cable stream stopping. On exit, knobs came back 0.2–0.9 s after `obs64.exe` ended, never before. In the exit timed against the mutex, OBS dropped its mutex 0.31 s before its process ended, and knobs waited for the process.
+- **The margin is thinner than M3 assumed.** OBS created its mutex 0.16 s after its process started, within 2 ms of its first log line. From there, a warm OBS on this PC opened its monitor 1.44–1.48 s later in five runs, and 2.37 s on the cold start. knobs checks for the mutex once a second, so in the worst case it lets go of the cable about 0.4 s before OBS starts sending. An OBS that loaded its audio less than a second after its mutex would get the cable while knobs still had it, for up to a second. (On a cold start, this OBS spent about 0.6 s initializing nv-filters and 0.6 s initializing obs-qsv11.) Checking the mutex every 100 ms would leave about 1.3 s here. Decided 2026-10-06: keep the 1 s check. This is a fast PC (Core Ultra 7 265K) running OBS with no third-party plugins, so few setups should load their audio sooner.
+- **Losing the mic.** Unplugging the iD4: win-wasapi saw its stream invalidated at 01:06:36.877. knobs listed the devices 0.51 s later (its 500 ms settle), was "mic missing" at once, and its cable stream stopped 13 ms after that. The notification came about 5 s after the unplug, and the "!" badge showed. Plugged back after 43 s: knobs loaded the chain 10 ms after it listed the devices, and the voice was on the cable at its first poll (−15 dBFS). How long Windows took to bring the iD4 back isn't logged; knobs's device settle adds at most 2 s. Not seen: whether the notification is taken down when the mic comes back, because it was closed by hand. `notices_tests` covers that.
+- **Idle cost (§7, 5).** Each over 60 s, with nothing clicked. CPU is the change in processor time, which Windows samples in 15.6 ms ticks. The cycle counts (`QueryProcessCycleTime`), which are exact, were taken over 30–60 s:
+
+  | | knobs running (OBS closed) | knobs paused (OBS open) | OBS minimized |
+  |---|---|---|---|
+  | CPU, one core | 0.72% | 0.44% | 5.64% |
+  | CPU by cycles | 1.02% | 0.39% | 7.52% |
+  | Working set | 36.2 MB | 30.7 MB | 468.9 MB |
+  | Private | 21.0 MB | 17.1 MB | 801.5 MB |
+  | Threads | 7–9 | 6–8 | 90–98 |
+  | Handles | 687 | 392 | 2205 |
+  | GPU | none | none | 0.05% |
+
+  OBS here is `obs64.exe` alone; it started no other processes. Running, knobs's cycles by thread: win-wasapi's capture thread, which runs the four filters and the monitor, 0.62%; the core's thread 0.20%; libobs's audio thread 0.12%; its hotkey thread 0.08%; the tray's thread nothing. The core's thread spends more than the OBS watch's 0.07% alone (M3 findings). What else it spends on wasn't measured.
+- **Cold boot (§7, 3).** After a restart, with nothing clicked: Windows booted at 01:22:08.5, and Daniel logged on at 01:22:17.881 (Winlogon event 7001). Explorer started `knobs.exe --startup` from the Run entry 9.26 s after logon. knobs loaded the chain and was running 9.48 s after logon, 0.22 s after it started, before Discord, Steam or Spotify had started. No window or notification appeared. Its stream was active on the cable, with the mic's floor at −75 dBFS, and Discord's mic test sounded right.
+
 ## 5. Milestones
 
 **M0 — Runtime bootstrap** (done 2026-09-30 against OBS 32.2.2; see M0 findings in §4)
@@ -354,6 +390,7 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 - [x] Error surfacing via tray notifications. Built 2026-10-05 (Built: notifications): a missing mic or cable after 5 s, the mic or chain changed in OBS, a filter knobs can't run, OBS updated, and the other problems that stop knobs, each taken down when it ends, with a click opening the fix. The icon's badges show the state while Do Not Disturb hides them. `knobs-tray` shows each.
 - [x] First run: one door for a mic already set up in OBS, one for people new to OBS (Tray and first run in §4). Built 2026-10-05 (Built: the first run): one task dialog, pages for each gap (no OBS, an unsupported one, its settings missing, no mic or no filters, several mics, monitoring to the default device, no cable, OBS open), resuming where it stopped, reopened by Setup…. `knobs-tray --first-run` shows any page. The setup guide it links to is the M4 README's.
 - [x] Exe icon from `assets/knobs.ico`. Done 2026-10-05: the logo has no tile anywhere in the app. `knobs.ico` is the knob alone, scaled up to fill the square, rendered from `knobs-app-icon.svg` by `tools/render-icon.ps1`. The tray shows it too, with Windows 11's status badges, instead of a glyph of its own (Tray and first run in §4).
+- [x] Test on real hardware against §7's criteria 2–5. Done 2026-10-06 (M3 test on real hardware in §4): knobs.exe met all four on the iD4, VB-Cable and Discord.
 - [ ] Long-run latency: run the mic into the cable for hours, alongside OBS for comparison, and watch for latency steps and clock drift (M1 findings). If latency creeps up, restarting the monitor resets it. Decide whether knobs should do that, for example while the mic is silent.
 
 **M4 — Ship**
@@ -374,7 +411,7 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 | `data/` path resolution (`find_libobs_data_file`) | Resolved in M0: the copy mirrors the install, the working directory is the copy's `bin\64bit`, and module paths are passed explicitly. The smoke test verifies both. |
 | Monitoring path latency differs from OBS | Same code path as OBS monitoring. Mic to cable on the same cable input: knobs 88.1 ms, OBS 87.7 ms (M1 findings). |
 | Latency creeps up over long sessions | libobs's monitor doesn't correct its delay for audio-only sources, so a hiccup raises latency until the stream restarts. OBS has the same behavior. One 10.6 ms step seen in M1. Measured over hours in M3. |
-| Doubled audio when OBS and knobs both monitor to VB-Cable | Auto-pause while `obs64.exe` runs. OBS is seen through its instance mutex within a second of starting, before it can load its audio, and a portable OBS within 2 s (M3 findings). |
+| Doubled audio when OBS and knobs both monitor to VB-Cable | Auto-pause while `obs64.exe` runs. OBS is seen through its instance mutex within a second of starting, before it can load its audio, and a portable OBS within 2 s (M3 findings). On real hardware, knobs let go of the cable 0.76–1.45 s before OBS came on. A warm OBS opened its monitor 1.44–1.48 s after its mutex, so the worst case leaves about 0.4 s; the 1 s check stays (M3 test on real hardware). |
 | Push-to-talk/mute on the imported source | Doesn't silence the cable: libobs's monitor ignores mute, in OBS too, from 32.2.0 on (M1 findings). The import summary notes it. PTT support is a v2 idea. |
 | OBS updates change scene JSON schema / filter IDs | `obs_load_source()` from the user's own OBS version; pre-flight validates and warns on unknown IDs. |
 | Chain includes a VST filter | Not supported in v1: stripped with a loud warning. v2 feature. |
@@ -386,10 +423,10 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 ## 7. Success criteria
 
 1. Harness output is bit-identical run-to-run, and the comparison against OBS is below threshold on test signals and real voice. Met in M2: the outputs are bit-identical.
-2. OBS closed, knobs in tray: mic sounds identical in Discord/Zoom/games.
-3. Cold boot → working filtered mic with zero clicks.
-4. Opening OBS while knobs runs never produces doubled audio.
-5. Idle resource usage meaningfully below OBS-minimized.
+2. OBS closed, knobs in tray: mic sounds identical in Discord/Zoom/games. Met on 2026-10-06 in Discord: knobs and OBS sounded the same by ear (M3 test on real hardware). Zoom and games weren't tried.
+3. Cold boot → working filtered mic with zero clicks. Met on 2026-10-06: knobs was running 9.5 s after logon, with nothing clicked.
+4. Opening OBS while knobs runs never produces doubled audio. Met on 2026-10-06 over six opens and closes: knobs and OBS were never active on the cable at once, and no echo was heard. The worst case leaves about 0.4 s on that PC.
+5. Idle resource usage meaningfully below OBS-minimized. Met on 2026-10-06: running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB.
 
 ## 8. Future ideas (v2+)
 
@@ -404,6 +441,11 @@ Checked against win-wasapi, libobs and the frontend at 32.2.2, and measured with
 - "Profiles" — switch between chains (streaming voice vs. calls)
 
 ---
+
+### Revision notes — Rev 20 (2026-10-06)
+
+- Tested knobs.exe on real hardware against §7's criteria 2–5: the daily path, the same sound as OBS, no doubling, losing the mic, idle cost and a cold boot. All passed (M3 test on real hardware).
+- Measured how soon OBS opens its monitor after its mutex: 1.44–1.48 s warm, leaving about 0.4 s in the worst case. The 1 s check stays.
 
 ### Revision notes — Rev 19 (2026-10-06)
 
