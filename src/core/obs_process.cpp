@@ -3,12 +3,15 @@
 
 #include <windows.h>
 #include <winternl.h>
+#include <wtsapi32.h>
 
 #include <algorithm>
 #include <cstdint>
 #include <cwchar>
 #include <string_view>
 #include <utility>
+
+#include "util/win_strings.h"
 
 namespace knobs::core {
 namespace {
@@ -18,15 +21,21 @@ constexpr std::chrono::seconds kScanInterval{2};
 using QuerySystemInformation = NTSTATUS(NTAPI*)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 constexpr NTSTATUS kInfoLengthMismatch = static_cast<NTSTATUS>(0xC0000004);
 
-// The processes named `exe` in Windows session `session`: the list has every
-// session's, and another user's can't be opened from this one. It reads the
-// process list as the kernel reports it, the call CreateToolhelp32Snapshot
-// makes, without the snapshot's copy of it: about a millisecond for 250
-// processes, a third of a snapshot read in full. Empty if it fails.
-std::vector<DWORD> ProcessesNamed(std::wstring_view exe, DWORD session, std::vector<std::byte>& buffer) {
+struct Found {
+  std::vector<DWORD> here;            // Process IDs in this session.
+  std::vector<DWORD> other_sessions;  // The other sessions they're in, sorted.
+};
+
+// The processes named `exe`: those in Windows session `session`, and the
+// other sessions that have some. Another user's can't be opened from this
+// session. It reads the process list as the kernel reports it, the call
+// CreateToolhelp32Snapshot makes, without the snapshot's copy of it: about a
+// millisecond for 250 processes, a third of a snapshot read in full. Empty if
+// it fails.
+Found ProcessesNamed(std::wstring_view exe, DWORD session, std::vector<std::byte>& buffer) {
   static const auto query = reinterpret_cast<QuerySystemInformation>(
       GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation"));
-  std::vector<DWORD> found;
+  Found found;
   if (!query) return found;
   if (buffer.empty()) buffer.resize(512 * 1024);
   ULONG needed = 0;
@@ -40,14 +49,30 @@ std::vector<DWORD> ProcessesNamed(std::wstring_view exe, DWORD session, std::vec
     const auto* process = reinterpret_cast<const SYSTEM_PROCESS_INFORMATION*>(buffer.data() + offset);
     const std::wstring_view name(process->ImageName.Buffer ? process->ImageName.Buffer : L"",
                                  process->ImageName.Length / sizeof(wchar_t));
-    if (process->SessionId == session && name.size() == exe.size() &&
-        _wcsnicmp(name.data(), exe.data(), exe.size()) == 0) {
-      found.push_back(static_cast<DWORD>(reinterpret_cast<uintptr_t>(process->UniqueProcessId)));
+    if (name.size() == exe.size() && _wcsnicmp(name.data(), exe.data(), exe.size()) == 0) {
+      const auto other = static_cast<DWORD>(process->SessionId);
+      if (other == session) {
+        found.here.push_back(static_cast<DWORD>(reinterpret_cast<uintptr_t>(process->UniqueProcessId)));
+      } else if (std::find(found.other_sessions.begin(), found.other_sessions.end(), other) ==
+                 found.other_sessions.end()) {
+        found.other_sessions.push_back(other);
+      }
     }
     if (process->NextEntryOffset == 0) break;
     offset += process->NextEntryOffset;
   }
+  std::sort(found.other_sessions.begin(), found.other_sessions.end());
   return found;
+}
+
+// The name of the account signed in to Windows session `session`, or "".
+std::string AccountIn(DWORD session) {
+  LPWSTR name = nullptr;
+  DWORD bytes = 0;
+  if (!WTSQuerySessionInformationW(WTS_CURRENT_SERVER_HANDLE, session, WTSUserName, &name, &bytes)) return "";
+  std::string account = name ? ToUtf8(std::wstring_view(name)) : "";
+  WTSFreeMemory(name);
+  return account;
 }
 
 bool MutexExists(const std::wstring& name) {
@@ -89,7 +114,13 @@ bool ObsWatch::Running() {
 void ObsWatch::Scan(std::chrono::steady_clock::time_point now) {
   next_scan_ = now + kScanInterval;
   unopened_ = false;
-  for (const DWORD id : ProcessesNamed(names_.exe, session_, buffer_)) {
+  const Found found = ProcessesNamed(names_.exe, session_, buffer_);
+  if (found.other_sessions != other_sessions_) {
+    other_sessions_ = found.other_sessions;
+    other_accounts_.clear();
+    for (const DWORD session : other_sessions_) other_accounts_.push_back(AccountIn(session));
+  }
+  for (const DWORD id : found.here) {
     if (std::find(process_ids_.begin(), process_ids_.end(), id) != process_ids_.end()) continue;
     if (const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, id)) {
       processes_.push_back(process);

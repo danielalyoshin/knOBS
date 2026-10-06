@@ -31,6 +31,7 @@ struct Notice {
     kChainChanged,    // The mic or its chain changed in OBS.
     kFilterWarnings,  // New pre-flight warnings: filters knobs can't run.
     kRestarted,       // The copy before this one restarted to follow OBS.
+    kOtherObs,        // OBS opened in another Windows account.
   };
 
   Kind kind = Kind::kChainChanged;
@@ -139,6 +140,7 @@ class Notifier {
   // Its warnings, by what each is about (WarningKey).
   std::vector<std::string> warnings_;
   std::string mic_name_;
+  std::vector<std::string> other_obs_;
   runtime::ObsVersion obs_version_;
   std::optional<Notice> shown_;
 };

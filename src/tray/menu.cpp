@@ -260,6 +260,12 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   status.enabled = false;
   items.push_back(std::move(status));
   if (auto fix = Fix(snapshot)) items.push_back(std::move(*fix));
+  if (!snapshot.other_obs.empty()) {
+    MenuItem other =
+        Command(kIdOtherObs, Escape(std::format("OBS is also open in {}", core::DescribeOtherObs(snapshot.other_obs))));
+    other.enabled = false;
+    items.push_back(std::move(other));
+  }
   items.push_back(Separator());
   items.push_back(snapshot.paused_by_user ? Command(kIdResume, "&Resume") : Command(kIdPause, "&Pause"));
   items.push_back(MicMenu(snapshot, settings, menu));

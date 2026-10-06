@@ -110,6 +110,10 @@ struct ChainSummary {
 // the tray menu and tooltip use, "Mic/Aux › 2 filters › CABLE In 16ch".
 std::string FormatChain(const ChainSummary& chain, bool short_form);
 
+// Where else OBS is open (Snapshot::other_obs): "Alex's Windows account",
+// "another Windows account" or "2 other Windows accounts".
+std::string DescribeOtherObs(const std::vector<std::string>& accounts);
+
 struct Snapshot {
   State state = State::kStarting;
   SetupNeed setup = SetupNeed::kNone;      // With kNeedsSetup.
@@ -128,6 +132,10 @@ struct Snapshot {
   // first import, then 1.
   uint32_t chain_revision = 0;
   bool obs_running = false;
+  // OBS running in other Windows accounts, by account name ("" where the name
+  // can't be read). It doesn't pause knobs, but it can send audio to the same
+  // cable, which apps here would hear mixed with this mic.
+  std::vector<std::string> other_obs;
   // Paused from the tray, even while a state above kPausedByUser shows.
   bool paused_by_user = false;
   // The OBS profile's monitoring device, once a profile has been read. Its

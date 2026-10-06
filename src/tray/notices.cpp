@@ -22,6 +22,9 @@ using audio::SameId;
 
 // What a balloon's text holds, less its terminator (NOTIFYICONDATAW::szInfo).
 constexpr size_t kMaxText = 255;
+// About what Windows 11 shows of a notification's text: four lines. It clips
+// the rest with no "…".
+constexpr size_t kShownText = 160;
 
 bool Connected(const std::vector<audio::AudioDevice>& devices, std::string_view id) {
   return FindById(devices, id) != nullptr;
@@ -178,16 +181,23 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
   }
 }
 
+// A text's length as a balloon holds it (kMaxText): in UTF-16 units.
+size_t Length(std::string_view text) { return FromUtf8(text).size(); }
+
 Notice ChainChanged(const core::Snapshot& snapshot, std::string_view mic_before) {
   const std::string& mic = snapshot.chain->mic;
+  std::string text = std::format("{} now runs: {}", kDisplayName, FullChain(*snapshot.chain));
+  // A chain too long to show whole: the short form, as the menu has it.
+  if (Length(text) > kShownText) {
+    core::ChainSummary short_cable = *snapshot.chain;
+    short_cable.cable = ShortDeviceName(short_cable.cable);
+    text = std::format("{} now runs: {}", kDisplayName, core::FormatChain(short_cable, true));
+  }
   return {.kind = Kind::kChainChanged,
           .title = mic_before.empty() || mic == mic_before ? std::format("{} changed in OBS", mic)
                                                            : std::format("OBS's mic is now {}", mic),
-          .text = std::format("{} now runs: {}", kDisplayName, FullChain(*snapshot.chain))};
+          .text = std::move(text)};
 }
-
-// A text's length as a balloon holds it (kMaxText): in UTF-16 units.
-size_t Length(std::string_view text) { return FromUtf8(text).size(); }
 
 // `text`, cut after a word and ended with "…" to fit in `length`.
 std::string Shortened(std::string_view text, size_t length) {
@@ -203,28 +213,28 @@ Notice FilterWarnings(const core::Snapshot& snapshot, const std::vector<std::str
   Notice notice{.kind = Kind::kFilterWarnings, .sound = true, .page = FirstRunPage::kWarnings};
   const std::string& mic = snapshot.chain->mic;
   notice.title = added.size() == 1 ? std::format("{} has a filter {} can't run", mic, kDisplayName)
-                                   : std::format("{} has {} filters {} can't run", mic, added.size(), kDisplayName);
-  std::string all;
-  for (const std::string& warning : added) all += (all.empty() ? "" : " ") + warning;
-  if (Length(all) <= kMaxText) {
-    notice.text = std::move(all);
-  } else if (added.size() == 1) {
-    notice.text = Shortened(all, kMaxText);
-  } else {
-    // The warnings that fit whole, with room for the line that says there
-    // are more.
-    constexpr std::string_view kMore = " Click to see them all.";
-    const size_t room = kMaxText - Length(kMore);
-    for (const std::string& warning : added) {
-      std::string next = notice.text.empty() ? warning : notice.text + " " + warning;
-      if (Length(next) > room) break;
-      notice.text = std::move(next);
-    }
-    // Not even the first: as much of it as fits.
-    if (notice.text.empty()) notice.text = Shortened(added.front(), room);
-    notice.text += kMore;
+                                   : std::format("{} has filters {} can't run", mic, kDisplayName);
+  std::string list;
+  for (const std::string& warning : added) list += (list.empty() ? "" : "\n") + warning;
+  if (added.size() == 1 && Length(list) <= kShownText) {
+    notice.text = std::move(list);
+    return notice;
   }
+  // Windows shows only the start of a long text, so the first line says
+  // what a click shows, and the warnings follow, each on a line of its own.
+  const std::string first = added.size() == 1 ? std::string("Click to see it in full.")
+                                              : std::format("{} warnings. Click to see them all.", added.size());
+  notice.text = Shortened(first + "\n" + list, kMaxText);
   return notice;
+}
+
+Notice OtherObs(const core::Snapshot& snapshot) {
+  const std::string cable = snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "the same cable";
+  return {.kind = Kind::kOtherObs,
+          .title = std::format("OBS is open in {}", core::DescribeOtherObs(snapshot.other_obs)),
+          .text = std::format("If it sends audio to {}, apps here hear it along with your mic. Close OBS there, or "
+                              "turn its monitoring off.",
+                              cable)};
 }
 
 std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& snapshot) {
@@ -280,6 +290,20 @@ Notifier::Update Notifier::Changed(const core::Snapshot& snapshot, bool quiet, C
   if (!cable_) Hide(Kind::kCableMissing, update);
   Due(mic_, Kind::kMicMissing, quiet, now, update);
   Due(cable_, Kind::kCableMissing, quiet, now, update);
+
+  // OBS opened in another Windows account, which can send audio to the same
+  // cable: knobs can't keep it out. Taken down when it closes.
+  if (snapshot.other_obs != other_obs_) {
+    const bool opened = std::any_of(snapshot.other_obs.begin(), snapshot.other_obs.end(), [this](const std::string& a) {
+      return std::find(other_obs_.begin(), other_obs_.end(), a) == other_obs_.end();
+    });
+    if (snapshot.other_obs.empty()) {
+      Hide(Kind::kOtherObs, update);
+    } else if (opened) {
+      Show(OtherObs(snapshot), quiet, update);
+    }
+    other_obs_ = snapshot.other_obs;
+  }
 
   // Other problems, as they begin.
   std::optional<std::pair<State, SetupNeed>> problem;

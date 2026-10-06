@@ -868,7 +868,10 @@ TEST(ObsWatchKeepsToItsSession) {
   if (!ProcessIdToSessionId(GetCurrentProcessId(), &session) || session == 0) return;
   ObsNames names = TestObsNames();
   names.exe = L"services.exe";
-  CHECK(!ObsWatch(names).Running());
+  ObsWatch watch(names);
+  CHECK(!watch.Running());
+  // But it's seen, for the tray to say: session 0's has no account name.
+  CHECK(watch.OtherAccounts() == std::vector<std::string>{""});
 }
 
 // --- Core --------------------------------------------------------------------------

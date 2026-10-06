@@ -32,7 +32,8 @@ struct ObsNames {
 //    one that can't be opened counts until a scan no longer finds it.
 // OBS is running while either says so: it has exited once its mutex is gone
 // and every OBS process found has ended. Another user's OBS, in a session of
-// its own, doesn't count. Not thread-safe.
+// its own, doesn't count, but the scan notes it (OtherAccounts): it can send
+// audio to the same cable. Not thread-safe.
 class ObsWatch {
  public:
   explicit ObsWatch(ObsNames names = {});
@@ -41,6 +42,9 @@ class ObsWatch {
   ObsWatch& operator=(const ObsWatch&) = delete;
 
   bool Running();
+  // The Windows accounts other than this one running OBS, as of the last
+  // scan, by name: "" where the name can't be read.
+  const std::vector<std::string>& OtherAccounts() const { return other_accounts_; }
 
  private:
   void Scan(std::chrono::steady_clock::time_point now);
@@ -50,6 +54,8 @@ class ObsWatch {
   std::vector<void*> processes_;  // HANDLEs, opened for SYNCHRONIZE.
   std::vector<unsigned long> process_ids_;
   bool unopened_ = false;  // The last scan found OBS processes it couldn't open.
+  std::vector<unsigned long> other_sessions_;  // Sessions of other OBS processes, sorted.
+  std::vector<std::string> other_accounts_;
   bool had_mutex_ = false;
   std::chrono::steady_clock::time_point next_scan_{};
   std::vector<std::byte> buffer_;  // For the process list, kept between scans.

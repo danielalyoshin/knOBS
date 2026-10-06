@@ -64,6 +64,8 @@ class Controller {
   void Start(bool obs_running, Clock::time_point now);
   // OBS started or exited. When it exits, its settings are imported again.
   void SetObsRunning(bool running, Clock::time_point now);
+  // The Windows accounts other than this one running OBS (Snapshot::other_obs).
+  void SetOtherObs(std::vector<std::string> accounts, Clock::time_point now);
   // A device notification. Acted on once they settle (Timing).
   void DevicesChanged(Clock::time_point now);
   void Pause(Clock::time_point now);
@@ -139,6 +141,7 @@ class Controller {
 
   bool paused_by_user_ = false;
   bool obs_running_ = false;
+  std::vector<std::string> other_obs_;
 
   // The running chain.
   std::optional<ChainPlan> loaded_;

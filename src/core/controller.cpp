@@ -49,6 +49,14 @@ void Controller::SetObsRunning(bool running, Clock::time_point now) {
   Reconcile(now);
 }
 
+void Controller::SetOtherObs(std::vector<std::string> accounts, Clock::time_point now) {
+  if (stopped_ || accounts == other_obs_) return;
+  other_obs_ = std::move(accounts);
+  backend_.Log(other_obs_.empty() ? std::string("OBS isn't running in another Windows account any more.")
+                                  : std::format("OBS is running in {} other Windows account(s).", other_obs_.size()));
+  Reconcile(now);
+}
+
 void Controller::DevicesChanged(Clock::time_point now) {
   if (stopped_) return;
   if (!devices_first_) devices_first_ = now;
@@ -270,6 +278,7 @@ void Controller::Reconcile(Clock::time_point now) {
 Snapshot Controller::Decide(Clock::time_point now) const {
   Snapshot next;
   next.obs_running = obs_running_;
+  next.other_obs = other_obs_;
   next.paused_by_user = paused_by_user_;
   next.chain_revision = chain_revision_;
   next.obs_cable = {profile_cable_name_, profile_cable_id_};

@@ -185,6 +185,13 @@ TEST(MenuListsTheDesignedItems) {
   paused.paused_by_user = true;
   const Menu paused_menu = BuildMenu(paused, {}, false);
   CHECK(FindItem(paused_menu.items, kIdResume) && !FindItem(paused_menu.items, kIdPause));
+
+  // OBS open in another Windows account: a line under the status, to read.
+  core::Snapshot other = Running();
+  other.other_obs = {"Alex"};
+  const Menu other_menu = BuildMenu(other, {}, false);
+  CHECK(other_menu.items[1].id == kIdOtherObs && !other_menu.items[1].enabled);
+  CHECK(other_menu.items[1].text == "OBS is also open in Alex's Windows account");
 }
 
 TEST(MenuOffersTheFixInBold) {

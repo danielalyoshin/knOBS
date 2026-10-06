@@ -38,6 +38,11 @@ std::string_view StateName(State state) {
   return "unknown";
 }
 
+std::string DescribeOtherObs(const std::vector<std::string>& accounts) {
+  if (accounts.size() != 1) return std::format("{} other Windows accounts", accounts.size());
+  return accounts.front().empty() ? "another Windows account" : std::format("{}'s Windows account", accounts.front());
+}
+
 std::string FormatChain(const ChainSummary& chain, bool short_form) {
   std::string text = chain.mic;
   if (short_form) {

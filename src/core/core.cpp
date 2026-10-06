@@ -18,7 +18,9 @@ using Clock = Controller::Clock;
 
 Result<std::unique_ptr<Core>> Core::Start(std::unique_ptr<Backend> backend, Observer& observer, CoreOptions options) {
   if (!options.obs_running) {
-    options.obs_running = [watch = std::make_shared<ObsWatch>()] { return watch->Running(); };
+    auto watch = std::make_shared<ObsWatch>();
+    options.obs_running = [watch] { return watch->Running(); };
+    if (!options.other_obs) options.other_obs = [watch] { return watch->OtherAccounts(); };
   }
   std::unique_ptr<Core> core(new Core(observer, std::move(options)));
   if (!core->wake_) return Error{"Couldn't create an event for the core's thread."};
@@ -145,6 +147,7 @@ void Core::Run(std::unique_ptr<Backend> backend, std::promise<Status>* started) 
           obs_running = running;
           controller.SetObsRunning(running, now);
         }
+        if (options_.other_obs) controller.SetOtherObs(options_.other_obs(), now);
         next_poll = now + options_.obs_poll;
       }
       controller.Tick(now);

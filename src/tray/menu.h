@@ -41,6 +41,7 @@ enum MenuId : unsigned {
   kIdFindObs,
   kIdRestart,
   kIdTryAgain,
+  kIdOtherObs,  // A line under the status: OBS open in another account.
   kIdMicFirst = 100,
   kIdCableFirst = 200,
   kIdCableLast = 299,

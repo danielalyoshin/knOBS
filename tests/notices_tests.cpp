@@ -360,14 +360,15 @@ Notice WarningsNotice(const std::vector<std::string>& warnings) {
 }
 
 TEST(NoticesFitWarningsInTheBalloon) {
-  constexpr std::string_view kMore = " Click to see them all.";
   // A balloon's text holds 255 UTF-16 units (NOTIFYICONDATAW::szInfo).
   const auto fits = [](const Notice& notice) { return FromUtf8(notice.text).size() <= 255; };
-  // The text shows the start of `warning`, up to the end of a word, then "…".
-  const auto cut_at_word = [](const Notice& notice, const std::string& warning) {
-    const size_t cut = notice.text.find("…");
-    return cut != std::string::npos && cut > 0 && warning.starts_with(notice.text.substr(0, cut)) &&
-           std::string_view(" ,.;:").find(warning[cut]) != std::string_view::npos;
+  // The text is `start`, then as much of `rest` as fits, cut after a word
+  // and ended with "…".
+  const auto cut_at_word = [](const Notice& notice, const std::string& start, const std::string& rest) {
+    if (!notice.text.starts_with(start) || !notice.text.ends_with("…")) return false;
+    const std::string shown = notice.text.substr(start.size(), notice.text.size() - start.size() - 3);
+    return !shown.empty() && rest.starts_with(shown) && std::string_view(" ,.;:").find(rest[shown.size()]) !=
+                                                             std::string_view::npos;
   };
   const auto ducking = [](std::string_view sidechain) {
     return std::format("Compressor \"Duck\" turns the mic down under \"{0}\" in OBS. {1} loads only the mic, so it "
@@ -383,25 +384,78 @@ TEST(NoticesFitWarningsInTheBalloon) {
                                       "VST plugins yet, so it leaves the filter out.",
                                       kDisplayName);
 
-  // As many whole warnings as fit with the line that says there are more.
-  Notice notice =
-      WarningsNotice({vst, unknown("DeepFilterNet", "deepfilternet_noise_suppression_filter"), ducking("Discord")});
-  CHECK(notice.text == vst + std::string(kMore) && fits(notice));
-  // A first warning too long for that line: as much of it as fits.
-  const std::string long_ducking = ducking("Discord Desktop Audio");
-  notice = WarningsNotice({long_ducking, vst});
-  CHECK(fits(notice) && notice.text.ends_with(kMore) && cut_at_word(notice, long_ducking));
-  // Alone, and too long for the balloon.
-  const std::string longer_ducking = ducking("Desktop Audio (Discord, Spotify and the game)");
+  // One that Windows shows whole: just the warning.
+  Notice notice = WarningsNotice({vst});
+  CHECK(notice.title == std::format("Mic/Aux has a filter {} can't run", kDisplayName) && notice.text == vst);
+  // Several: the first line says how many and what a click shows, then each
+  // warning on a line of its own, as much as the balloon holds.
+  const std::string a = unknown("A", "a");
+  const std::string b = unknown("B", "b");
+  notice = WarningsNotice({a, b});
+  CHECK(notice.title == std::format("Mic/Aux has filters {} can't run", kDisplayName));
+  CHECK(notice.text == "2 warnings. Click to see them all.\n" + a + "\n" + b);
+  const std::string deep = unknown("DeepFilterNet", "deepfilternet_noise_suppression_filter");
+  notice = WarningsNotice({vst, deep, ducking("Discord")});
+  CHECK(fits(notice) && cut_at_word(notice, "3 warnings. Click to see them all.\n" + vst + "\n", deep));
+  // One too long to show whole: the first line says a click shows it all.
+  const std::string long_ducking = ducking("Discord");
+  notice = WarningsNotice({long_ducking});
+  CHECK(notice.text == "Click to see it in full.\n" + long_ducking && fits(notice));
+  // And too long for the balloon: as much of it as fits.
+  const std::string longer_ducking = ducking("Discord Desktop Audio");
   notice = WarningsNotice({longer_ducking});
-  CHECK(fits(notice) && !notice.text.ends_with(kMore) && cut_at_word(notice, longer_ducking));
+  CHECK(fits(notice) && cut_at_word(notice, "Click to see it in full.\n", longer_ducking));
   // Measured as the balloon holds them: these fit whole, though their UTF-8
   // doesn't.
   const std::string cyrillic = unknown("Шумоподавление для микрофона", "rnnoise_ru");
-  const std::string cyrillic_2 = unknown("Подавление эха и шумов в комнате", "echo_ru");
-  CHECK(cyrillic.size() + 1 + cyrillic_2.size() > 255);
+  const std::string cyrillic_2 = unknown("Подавление эха и шумов", "echo_ru");
+  const std::string both = "2 warnings. Click to see them all.\n" + cyrillic + "\n" + cyrillic_2;
+  CHECK(both.size() > 255);
   notice = WarningsNotice({cyrillic, cyrillic_2});
-  CHECK(notice.text == cyrillic + " " + cyrillic_2 && fits(notice));
+  CHECK(notice.text == both && fits(notice));
+}
+
+TEST(NoticesShortenALongChain) {
+  // A chain too long to show whole says it in the short form, as the menu does.
+  Fixture f;
+  f.Start();
+  f.ObsOpens();
+  f.ObsCloses([](FakeWorld& world) {
+    import::ImportedMic& mic = world.collection.front();
+    for (int i = 1; i <= 12; ++i) mic.filters.push_back(std::format("Parametric EQ band {}", i));
+    mic.mic.filters = mic.filters;
+    mic.chain_key += "|long";
+  });
+  CHECK(f.last.kind == Notice::Kind::kChainChanged);
+  CHECK(f.last.text == std::format("{} now runs: Mic/Aux › 16 filters › CABLE In 16ch", kDisplayName));
+}
+
+TEST(NoticesSayObsIsOpenInAnotherAccount) {
+  // It can send audio to the same cable, which knobs can't keep out, so it's
+  // said as it opens and taken down as it closes. knobs runs on.
+  Fixture f;
+  f.Start();
+  f.controller.SetOtherObs({"Alex"}, f.now);
+  f.Feed();
+  CHECK(f.state() == State::kRunning);
+  CHECK(f.events == std::vector<std::string>{"OBS is open in Alex's Windows account"});
+  CHECK(f.last.text ==
+        "If it sends audio to CABLE In 16ch, apps here hear it along with your mic. Close OBS there, or turn its "
+        "monitoring off.");
+  CHECK(!f.last.problem && !f.last.page && f.notifier.badge() == Badge::kNone);
+  // Another account too: said again. Then both close.
+  f.controller.SetOtherObs({"Alex", "Sam"}, f.now);
+  f.Feed();
+  CHECK(f.events.size() == 2 && f.last.title == "OBS is open in 2 other Windows accounts");
+  f.controller.SetOtherObs({}, f.now);
+  f.Feed();
+  CHECK(f.events.size() == 3 && f.events.back() == "-");
+  // Already open when knobs starts, seen right after: said too.
+  Fixture g;
+  g.Start();
+  g.controller.SetOtherObs({""}, g.now);
+  g.Feed();
+  CHECK(g.events == std::vector<std::string>{"OBS is open in another Windows account"});
 }
 
 // --- OBS updates --------------------------------------------------------------------

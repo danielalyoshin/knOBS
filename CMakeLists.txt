@@ -52,7 +52,7 @@ add_library(knobs_runtime STATIC
 target_include_directories(knobs_runtime PUBLIC src)
 target_link_libraries(knobs_runtime
   PUBLIC libobs_headers knobs_options
-  PRIVATE version shell32 ole32
+  PRIVATE version shell32 ole32 wtsapi32
 )
 
 # The project's version, for the code and knobs.exe's version resource.
