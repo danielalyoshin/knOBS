@@ -188,10 +188,16 @@ TEST(MenuListsTheDesignedItems) {
 
   // OBS open in another Windows account: a line under the status, to read.
   core::Snapshot other = Running();
-  other.other_obs = {"Alex"};
+  other.other_obs = {{.session = 2, .account = "Alex"}};
   const Menu other_menu = BuildMenu(other, {}, false);
   CHECK(other_menu.items[1].id == kIdOtherObs && !other_menu.items[1].enabled);
   CHECK(other_menu.items[1].text == "OBS in Alex's account may also send audio to CABLE In 16ch");
+  // Before a cable is chosen.
+  other.state = State::kNeedsSetup;
+  other.setup = SetupNeed::kCable;
+  other.chain->cable.clear();
+  CHECK(FindItem(BuildMenu(other, {}, false).items, kIdOtherObs)->text ==
+        "OBS in Alex's account may also send audio to your cable");
 }
 
 TEST(MenuOffersTheFixInBold) {

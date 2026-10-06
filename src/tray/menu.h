@@ -78,6 +78,13 @@ std::string StatusLine(const core::Snapshot& snapshot);
 // settings shows it on its first line.
 std::string ShortDeviceName(std::string_view name);
 
+// The chain as the tray says it, with the cable's short name: in full, or in
+// the short form the menu and tooltip use.
+std::string ChainText(const core::ChainSummary& chain, bool short_form);
+
+// The cable the mic goes to, by its short name, or "" until one is known.
+std::string ShortCableName(const core::Snapshot& snapshot);
+
 // Whether a playback device is a virtual cable (VB-Cable, VoiceMeeter, VB's
 // Hi-Fi Cable, Virtual Audio Cable), going by its name.
 bool IsVirtualCable(std::string_view name);

@@ -20,7 +20,7 @@ Result<std::unique_ptr<Core>> Core::Start(std::unique_ptr<Backend> backend, Obse
   if (!options.obs_running) {
     auto watch = std::make_shared<ObsWatch>();
     options.obs_running = [watch] { return watch->Running(); };
-    if (!options.other_obs) options.other_obs = [watch] { return watch->OtherAccounts(); };
+    if (!options.other_obs) options.other_obs = [watch] { return watch->Others(); };
   }
   std::unique_ptr<Core> core(new Core(observer, std::move(options)));
   if (!core->wake_) return Error{"Couldn't create an event for the core's thread."};

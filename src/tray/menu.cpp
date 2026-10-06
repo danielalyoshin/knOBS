@@ -47,12 +47,6 @@ MenuItem Submenu(unsigned id, std::string text) {
   return {.kind = MenuItem::Kind::kSubmenu, .id = id, .text = std::move(text)};
 }
 
-std::string ShortChain(const core::ChainSummary& chain) {
-  core::ChainSummary short_chain = chain;
-  short_chain.cable = ShortDeviceName(chain.cable);
-  return core::FormatChain(short_chain, true);
-}
-
 // The fix for what needs the user, if there's one in the menu.
 std::optional<MenuItem> Fix(const core::Snapshot& snapshot) {
   MenuItem fix;
@@ -176,7 +170,7 @@ MenuItem CableMenu(const core::Snapshot& snapshot, const core::Settings& setting
 }  // namespace
 
 std::string StatusLine(const core::Snapshot& snapshot) {
-  const std::string chain = snapshot.chain ? ShortChain(*snapshot.chain) : "";
+  const std::string chain = snapshot.chain ? ChainText(*snapshot.chain, true) : "";
   const auto with_chain = [&chain](std::string_view state) {
     return chain.empty() ? std::string(state) : std::format("{}: {}", state, chain);
   };
@@ -237,6 +231,16 @@ std::string ShortDeviceName(std::string_view name) {
   return std::string(name);
 }
 
+std::string ChainText(const core::ChainSummary& chain, bool short_form) {
+  core::ChainSummary short_cable = chain;
+  short_cable.cable = ShortDeviceName(chain.cable);
+  return core::FormatChain(short_cable, short_form);
+}
+
+std::string ShortCableName(const core::Snapshot& snapshot) {
+  return snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "";
+}
+
 bool IsVirtualCable(std::string_view name) {
   const std::string lower = AsciiLower(name);
   return lower.find("vb-audio") != std::string::npos || lower.find("virtual audio cable") != std::string::npos;
@@ -261,9 +265,10 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   items.push_back(std::move(status));
   if (auto fix = Fix(snapshot)) items.push_back(std::move(*fix));
   if (!snapshot.other_obs.empty()) {
-    const std::string cable = snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "your cable";
+    const std::string cable = ShortCableName(snapshot);
     MenuItem other = Command(kIdOtherObs, Escape(std::format("OBS in {} may also send audio to {}",
-                                                             core::DescribeOtherObs(snapshot.other_obs), cable)));
+                                                             core::DescribeOtherObs(snapshot.other_obs),
+                                                             cable.empty() ? "your cable" : cable)));
     other.enabled = false;
     items.push_back(std::move(other));
   }

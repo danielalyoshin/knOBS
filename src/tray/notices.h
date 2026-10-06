@@ -31,7 +31,7 @@ struct Notice {
     kChainChanged,    // The mic or its chain changed in OBS.
     kFilterWarnings,  // New pre-flight warnings: filters knobs can't run.
     kRestarted,       // The copy before this one restarted to follow OBS.
-    kOtherObs,        // OBS opened in another Windows account.
+    kOtherObs,        // OBS opened in another Windows session.
   };
 
   Kind kind = Kind::kChainChanged;
@@ -63,6 +63,9 @@ std::optional<core::RestartNeed> RestartNeedNamed(std::string_view name);
 //   one after the first import, but a change knobs's own settings made gets
 //   none.
 // - After a restart to follow OBS, the new copy says why.
+// - OBS opening in another Windows session gets one, unless one of the
+//   above is shown at the same time, and it's taken down when that OBS
+//   closes.
 // - Nothing shows while `quiet`: the first run is unfinished or open, and
 //   shows the state itself. What it would have said isn't said later.
 class Notifier {
@@ -140,7 +143,7 @@ class Notifier {
   // Its warnings, by what each is about (WarningKey).
   std::vector<std::string> warnings_;
   std::string mic_name_;
-  std::vector<std::string> other_obs_;
+  std::vector<core::OtherObs> other_obs_;
   runtime::ObsVersion obs_version_;
   std::optional<Notice> shown_;
 };

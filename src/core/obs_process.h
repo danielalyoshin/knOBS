@@ -2,10 +2,13 @@
 #pragma once
 
 #include <chrono>
-#include <cstddef>
+#include <functional>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
+#include "core/state.h"
 #include "runtime/obs_layout.h"
 
 namespace knobs::core {
@@ -17,6 +20,12 @@ struct ObsNames {
   // folder to "OBSStudioPortable" instead.
   std::wstring mutex = L"OBSStudioCore";
   std::wstring exe{runtime::kObsExe};
+};
+
+// A process with OBS's name, as a scan of the process list finds it.
+struct ObsProcess {
+  unsigned long id = 0;
+  unsigned long session = 0;  // Its Windows session.
 };
 
 // Tells whether OBS is running in this Windows session, cheaply enough to
@@ -31,34 +40,46 @@ struct ObsNames {
 //    folder. The processes found are then watched through their handles, and
 //    one that can't be opened counts until a scan no longer finds it.
 // OBS is running while either says so: it has exited once its mutex is gone
-// and every OBS process found has ended. Another user's OBS, in a session of
-// its own, doesn't count, but the scan notes it (OtherAccounts): it can send
-// audio to the same cable. Not thread-safe.
+// and every OBS process found has ended. OBS in another session, another
+// user's or this user's signed in again, doesn't count, but the scan notes it
+// (Others): it can send audio to the same cable. A scan that can't read the
+// process list changes nothing. Not thread-safe.
 class ObsWatch {
  public:
-  explicit ObsWatch(ObsNames names = {});
+  // What it asks Windows, for tests to stand in for. Empty asks Windows.
+  struct System {
+    // The processes named `exe`, in every session, or nullopt if the process
+    // list can't be read.
+    std::function<std::optional<std::vector<ObsProcess>>(std::wstring_view exe)> processes;
+    // The account signed in to a session, as DOMAIN\name, or "" where it
+    // can't be read.
+    std::function<std::string(unsigned long session)> account;
+  };
+
+  explicit ObsWatch(ObsNames names = {}, System system = {});
   ~ObsWatch();
   ObsWatch(const ObsWatch&) = delete;
   ObsWatch& operator=(const ObsWatch&) = delete;
 
   bool Running();
-  // The Windows accounts other than this one running OBS, as of the last
-  // scan, by name: "" where the name can't be read.
-  const std::vector<std::string>& OtherAccounts() const { return other_accounts_; }
+  // OBS in other Windows sessions, as of the last scan, by session. Not
+  // session 0, which runs services: no one signs in to it.
+  const std::vector<OtherObs>& Others() const { return others_; }
 
  private:
   void Scan(std::chrono::steady_clock::time_point now);
 
   ObsNames names_;
+  System system_;
   unsigned long session_ = 0;     // This process's Windows session.
+  std::string account_;           // Its account, as System::account names it.
   std::vector<void*> processes_;  // HANDLEs, opened for SYNCHRONIZE.
   std::vector<unsigned long> process_ids_;
   bool unopened_ = false;  // The last scan found OBS processes it couldn't open.
   std::vector<unsigned long> other_sessions_;  // Sessions of other OBS processes, sorted.
-  std::vector<std::string> other_accounts_;
+  std::vector<OtherObs> others_;
   bool had_mutex_ = false;
   std::chrono::steady_clock::time_point next_scan_{};
-  std::vector<std::byte> buffer_;  // For the process list, kept between scans.
 };
 
 }  // namespace knobs::core

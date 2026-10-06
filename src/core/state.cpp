@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "core/state.h"
 
+#include <algorithm>
 #include <format>
 
 namespace knobs::core {
@@ -38,9 +39,27 @@ std::string_view StateName(State state) {
   return "unknown";
 }
 
-std::string DescribeOtherObs(const std::vector<std::string>& accounts) {
-  if (accounts.size() != 1) return std::format("{} other Windows accounts", accounts.size());
-  return accounts.front().empty() ? "another Windows account" : std::format("{}'s account", accounts.front());
+std::string DescribeOtherObs(const std::vector<OtherObs>& others) {
+  // Accounts whose names can't be read can't be told apart.
+  std::vector<std::string_view> named;
+  size_t unnamed = 0;
+  size_t yours = 0;
+  for (const OtherObs& other : others) {
+    if (other.yours) {
+      ++yours;
+    } else if (other.account.empty()) {
+      ++unnamed;
+    } else if (std::find(named.begin(), named.end(), other.account) == named.end()) {
+      named.push_back(other.account);
+    }
+  }
+  const size_t accounts = named.size() + unnamed;
+  if (yours > 0) {
+    if (accounts > 0) return std::format("{} other Windows sessions", others.size());
+    return yours == 1 ? "your other session" : "your other sessions";
+  }
+  if (accounts != 1) return std::format("{} other Windows accounts", accounts);
+  return named.empty() ? "another Windows account" : std::format("{}'s account", named.front());
 }
 
 std::string FormatChain(const ChainSummary& chain, bool short_form) {

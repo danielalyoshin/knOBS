@@ -110,9 +110,22 @@ struct ChainSummary {
 // the tray menu and tooltip use, "Mic/Aux › 2 filters › CABLE In 16ch".
 std::string FormatChain(const ChainSummary& chain, bool short_form);
 
+// OBS open in another Windows session (Snapshot::other_obs).
+struct OtherObs {
+  uint32_t session = 0;  // The session's ID.
+  // The name of the account signed in to it, or "" where it can't be read.
+  std::string account;
+  // That account is this one, signed in a second time, as Remote Desktop
+  // allows on a server.
+  bool yours = false;
+
+  friend bool operator==(const OtherObs&, const OtherObs&) = default;
+};
+
 // Where else OBS is open (Snapshot::other_obs): "Alex's account", "another
-// Windows account" or "2 other Windows accounts".
-std::string DescribeOtherObs(const std::vector<std::string>& accounts);
+// Windows account", "2 other Windows accounts", or "your other session".
+// An account signed in twice counts once.
+std::string DescribeOtherObs(const std::vector<OtherObs>& others);
 
 struct Snapshot {
   State state = State::kStarting;
@@ -132,10 +145,10 @@ struct Snapshot {
   // first import, then 1.
   uint32_t chain_revision = 0;
   bool obs_running = false;
-  // OBS running in other Windows accounts, by account name ("" where the name
-  // can't be read). It doesn't pause knobs, but it can send audio to the same
-  // cable, which apps here would hear mixed with this mic.
-  std::vector<std::string> other_obs;
+  // OBS running in other Windows sessions, by session. It doesn't pause
+  // knobs, but it can send audio to the same cable, which apps here would
+  // hear mixed with this mic.
+  std::vector<OtherObs> other_obs;
   // Paused from the tray, even while a state above kPausedByUser shows.
   bool paused_by_user = false;
   // The OBS profile's monitoring device, once a profile has been read. Its

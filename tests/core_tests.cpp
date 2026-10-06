@@ -869,17 +869,78 @@ TEST(ObsWatchCountsAProcessItCantOpenUntilItEnds) {
 }
 
 TEST(ObsWatchKeepsToItsSession) {
-  // Another user's OBS runs in a session of its own, and its process can't
-  // be opened from this one. services.exe stands in for it: it runs in
-  // session 0, where no one signs in.
+  // A process in another session can't be opened from this one.
+  // services.exe runs in session 0, which runs services: no one signs in to
+  // it, so it isn't noted either.
   DWORD session = 0;
   if (!ProcessIdToSessionId(GetCurrentProcessId(), &session) || session == 0) return;
   ObsNames names = TestObsNames();
   names.exe = L"services.exe";
   ObsWatch watch(names);
   CHECK(!watch.Running());
-  // But it's seen, for the tray to say: session 0's has no account name.
-  CHECK(watch.OtherAccounts() == std::vector<std::string>{""});
+  CHECK(watch.Others().empty());
+}
+
+TEST(ObsWatchNotesObsInOtherSessions) {
+  // Sessions this one can't make: Alex's, this account's signed in again,
+  // and one whose account can't be read. And session 0.
+  DWORD here = 0;
+  if (!ProcessIdToSessionId(GetCurrentProcessId(), &here) || here == 0) return;
+  const uint32_t alex = here + 1;
+  const uint32_t again = here + 2;
+  const uint32_t unknown = here + 3;
+  std::optional<std::vector<ObsProcess>> processes =
+      std::vector<ObsProcess>{{100, unknown}, {104, alex}, {108, 0}, {112, again}, {116, alex}};
+  ObsWatch::System system{
+      .processes = [&processes](std::wstring_view) { return processes; },
+      .account = [&](unsigned long session) -> std::string {
+        if (session == here || session == again) return "PC\\Daniel";
+        return session == alex ? "PC\\Alex" : "";
+      },
+  };
+  const ObsNames names = TestObsNames();
+  ObsWatch watch(names, system);
+  CHECK(!watch.Running());
+  CHECK(watch.Others() == (std::vector<OtherObs>{{.session = alex, .account = "Alex"},
+                                                 {.session = again, .account = "Daniel", .yours = true},
+                                                 {.session = unknown}}));
+  // Gone.
+  processes = std::vector<ObsProcess>{};
+  const HANDLE mutex = CreateMutexW(nullptr, FALSE, names.mutex.c_str());  // Scans at once.
+  CHECK(watch.Running());
+  CHECK(watch.Others().empty());
+  CloseHandle(mutex);
+}
+
+TEST(ObsWatchKeepsWhatItFoundWhenAScanFails) {
+  DWORD here = 0;
+  ProcessIdToSessionId(GetCurrentProcessId(), &here);
+  // OBS in this session that can't be opened (no process has the ID), and
+  // OBS in another.
+  std::optional<std::vector<ObsProcess>> processes =
+      std::vector<ObsProcess>{{0xfffffff0, here}, {100, here + 1}};
+  ObsWatch watch(TestObsNames(), {.processes = [&processes](std::wstring_view) { return processes; }});
+  CHECK(watch.Running() && watch.Others().size() == 1);
+  // The process list can't be read: nothing has changed as far as anyone
+  // knows.
+  processes.reset();
+  std::this_thread::sleep_for(2100ms);
+  CHECK(watch.Running() && watch.Others().size() == 1);
+}
+
+TEST(OtherObsIsDescribedByAccount) {
+  const OtherObs alex{.session = 2, .account = "Alex"};
+  const OtherObs sam{.session = 3, .account = "Sam"};
+  const OtherObs yours{.session = 4, .account = "Daniel", .yours = true};
+  CHECK(DescribeOtherObs({alex}) == "Alex's account");
+  CHECK(DescribeOtherObs({{.session = 2}}) == "another Windows account");
+  CHECK(DescribeOtherObs({alex, sam}) == "2 other Windows accounts");
+  CHECK(DescribeOtherObs({{.session = 2}, {.session = 3}}) == "2 other Windows accounts");
+  // An account signed in twice counts once.
+  CHECK(DescribeOtherObs({alex, {.session = 5, .account = "Alex"}}) == "Alex's account");
+  CHECK(DescribeOtherObs({yours}) == "your other session");
+  CHECK(DescribeOtherObs({yours, {.session = 5, .account = "Daniel", .yours = true}}) == "your other sessions");
+  CHECK(DescribeOtherObs({alex, yours}) == "2 other Windows sessions");
 }
 
 // --- Core --------------------------------------------------------------------------

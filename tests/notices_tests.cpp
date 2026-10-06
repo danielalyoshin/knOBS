@@ -72,6 +72,12 @@ struct Fixture {
     for (const core::Snapshot& snapshot : pending) Apply(notifier.Changed(snapshot, quiet, now));
     pending.clear();
   }
+  // Passes only the last, as the tray does when the core publishes faster
+  // than it takes them (TrayApp::OnSnapshot).
+  void FeedLast() {
+    if (!pending.empty()) Apply(notifier.Changed(pending.back(), quiet, now));
+    pending.clear();
+  }
 
   void Start(bool obs_running = false) {
     controller.Start(obs_running, now);
@@ -388,7 +394,7 @@ TEST(NoticesFitWarningsInTheBalloon) {
   Notice notice = WarningsNotice({vst});
   CHECK(notice.title == std::format("Mic/Aux has a filter {} can't run", kDisplayName) && notice.text == vst);
   // Several: the first line says how many and what a click shows, then each
-  // warning on a line of its own, as much as the balloon holds.
+  // warning on a line of its own, those the balloon holds whole.
   const std::string a = unknown("A", "a");
   const std::string b = unknown("B", "b");
   notice = WarningsNotice({a, b});
@@ -396,7 +402,7 @@ TEST(NoticesFitWarningsInTheBalloon) {
   CHECK(notice.text == "2 warnings. Click to see them all.\n" + a + "\n" + b);
   const std::string deep = unknown("DeepFilterNet", "deepfilternet_noise_suppression_filter");
   notice = WarningsNotice({vst, deep, ducking("Discord")});
-  CHECK(fits(notice) && cut_at_word(notice, "3 warnings. Click to see them all.\n" + vst + "\n", deep));
+  CHECK(notice.text == "3 warnings. Click to see them all.\n" + vst);
   // One too long to show whole: the first line says a click shows it all.
   const std::string long_ducking = ducking("Discord");
   notice = WarningsNotice({long_ducking});
@@ -415,6 +421,18 @@ TEST(NoticesFitWarningsInTheBalloon) {
   CHECK(notice.text == both && fits(notice));
 }
 
+TEST(NoticesKeepWarningsThatFitWhole) {
+  // The balloon's limit falls in the first word of the second warning: the
+  // first, which fits, is kept whole.
+  const std::string start = "2 warnings. Click to see them all.\n";
+  std::string first = std::format("Filter \"A\" isn't one {} has.", kDisplayName);
+  while (start.size() + first.size() + 1 < 245) first += " More.";
+  const std::string second = "Compressor \"Duck\" turns the mic down under \"Discord\" in OBS.";
+  CHECK(start.size() + first.size() + 1 <= 254 && start.size() + first.size() + 1 + second.size() > 255);
+  const Notice notice = WarningsNotice({first, second});
+  CHECK(notice.text == start + first);
+}
+
 TEST(NoticesShortenALongChain) {
   // A chain too long to show whole says it in the short form, as the menu does.
   Fixture f;
@@ -430,12 +448,18 @@ TEST(NoticesShortenALongChain) {
   CHECK(f.last.text == std::format("{} now runs: Mic/Aux › 16 filters › CABLE In 16ch", kDisplayName));
 }
 
+// OBS in other sessions: Alex's, Sam's, and one whose account's name can't
+// be read.
+const core::OtherObs kAlex{.session = 2, .account = "Alex"};
+const core::OtherObs kSam{.session = 3, .account = "Sam"};
+core::OtherObs Unnamed(uint32_t session) { return {.session = session}; }
+
 TEST(NoticesSayObsIsOpenInAnotherAccount) {
   // It can send audio to the same cable, which knobs can't keep out, so it's
   // said as it opens and taken down as it closes. knobs runs on.
   Fixture f;
   f.Start();
-  f.controller.SetOtherObs({"Alex"}, f.now);
+  f.controller.SetOtherObs({kAlex}, f.now);
   f.Feed();
   CHECK(f.state() == State::kRunning);
   // What it means for the mic, not just that it's open, all of it within
@@ -447,7 +471,7 @@ TEST(NoticesSayObsIsOpenInAnotherAccount) {
   CHECK(FromUtf8(f.last.text).size() <= 160);
   CHECK(!f.last.problem && !f.last.page && f.notifier.badge() == Badge::kNone);
   // Another account too: said again. Then both close.
-  f.controller.SetOtherObs({"Alex", "Sam"}, f.now);
+  f.controller.SetOtherObs({kAlex, kSam}, f.now);
   f.Feed();
   CHECK(f.events.size() == 2 && f.last.title == "OBS in 2 other Windows accounts may send audio to CABLE In 16ch");
   f.controller.SetOtherObs({}, f.now);
@@ -456,9 +480,120 @@ TEST(NoticesSayObsIsOpenInAnotherAccount) {
   // Already open when knobs starts, seen right after: said too.
   Fixture g;
   g.Start();
-  g.controller.SetOtherObs({""}, g.now);
+  g.controller.SetOtherObs({Unnamed(2)}, g.now);
   g.Feed();
   CHECK(g.events == std::vector<std::string>{"OBS in another Windows account may send audio to CABLE In 16ch"});
+}
+
+TEST(NoticesSayObsInEachNewSession) {
+  // Accounts whose names can't be read are told apart by their sessions.
+  Fixture f;
+  f.Start();
+  f.controller.SetOtherObs({Unnamed(2)}, f.now);
+  f.Feed();
+  f.controller.SetOtherObs({Unnamed(2), Unnamed(3)}, f.now);
+  f.Feed();
+  CHECK(f.events.size() == 2 && f.last.title == "OBS in 2 other Windows accounts may send audio to CABLE In 16ch");
+  // An account signed in twice is one account, but the OBS in its second
+  // session is news.
+  Fixture g;
+  g.Start();
+  g.controller.SetOtherObs({kAlex}, g.now);
+  g.Feed();
+  g.controller.SetOtherObs({kAlex, {.session = 4, .account = "Alex"}}, g.now);
+  g.Feed();
+  CHECK(g.events.size() == 2 && g.last.title == "OBS in Alex's account may send audio to CABLE In 16ch");
+}
+
+TEST(NoticesSayObsInYourOtherSession) {
+  // This account, signed in a second time.
+  Fixture f;
+  f.Start();
+  f.controller.SetOtherObs({{.session = 2, .account = "Daniel", .yours = true}}, f.now);
+  f.Feed();
+  CHECK(f.events == std::vector<std::string>{"OBS in your other session may send audio to CABLE In 16ch"});
+  CHECK(f.last.text ==
+        "Windows keeps it running while you use this session. If it monitors to that cable, apps here hear it with "
+        "your mic. Close it there or turn monitoring off.");
+}
+
+TEST(NoticesSayWhatComesWithObsInAnotherAccount) {
+  // OBS here closes with a filter knobs can't run, and OBS opens in another
+  // account, in one poll: the tray gets one snapshot with both. The warning,
+  // which plays a sound, says more.
+  Fixture f;
+  f.Start();
+  f.ObsOpens();
+  f.world->Change(tools::ToggleVstFilter);
+  f.controller.SetObsRunning(false, f.now);
+  f.controller.SetOtherObs({kAlex}, f.now);
+  f.FeedLast();
+  CHECK(f.events == std::vector<std::string>{std::format("Mic/Aux has a filter {} can't run", kDisplayName)});
+  // Likewise a change to the chain.
+  Fixture g;
+  g.Start();
+  g.ObsOpens();
+  g.world->Change(tools::EditChain);
+  g.controller.SetObsRunning(false, g.now);
+  g.controller.SetOtherObs({kAlex}, g.now);
+  g.FeedLast();
+  CHECK(g.events == std::vector<std::string>{"Mic/Aux changed in OBS"});
+}
+
+TEST(NoticesSayObsInAnotherAccountBeforeACableIsChosen) {
+  FakeWorld world = tools::DefaultWorld();
+  world.config.audio.monitoring_device_id = "default";
+  world.config.audio.monitoring_device_name.clear();
+  Fixture f(world);
+  f.Start();
+  CHECK(f.state() == State::kNeedsSetup && f.controller.snapshot().chain);
+  f.controller.SetOtherObs({kAlex}, f.now);
+  f.Feed();
+  CHECK(f.last.title == "OBS in Alex's account may send audio to your cable");
+  CHECK(f.last.text.find("If it monitors to that cable,") != std::string::npos);
+}
+
+TEST(NoticesFitObsInAnotherAccountInTheTitle) {
+  // A title holds 63 UTF-16 units (NOTIFYICONDATAW::szInfoTitle), and
+  // Windows shows about 160 of a text.
+  const auto fits = [](const Notice& notice) {
+    return FromUtf8(notice.title).size() <= 63 && FromUtf8(notice.text).size() <= 160;
+  };
+  const auto sends_to = [](std::string_view cable) {
+    return std::format("Windows keeps it running while you use this account. If it monitors to {}, apps here hear "
+                       "it with your mic. Close it there or turn monitoring off.",
+                       cable);
+  };
+  // OBS sends the mic to `name`.
+  const auto with_cable = [](std::string name) {
+    FakeWorld world = tools::DefaultWorld();
+    world.devices.outputs.push_back({name, "{0.0.0.00000000}.{long-cable}"});
+    world.config.audio.monitoring_device_id = "{0.0.0.00000000}.{long-cable}";
+    world.config.audio.monitoring_device_name = std::move(name);
+    return world;
+  };
+
+  // The cable's name would make the title too long: the text names it.
+  Fixture f(with_cable("CABLE-A In 16ch (VB-Audio Cable A)"));
+  f.Start();
+  f.controller.SetOtherObs({kAlex, kSam}, f.now);
+  f.Feed();
+  CHECK(fits(f.last) && f.last.title == "OBS in 2 other Windows accounts may send audio to your cable");
+  CHECK(f.last.text == sends_to("CABLE-A In 16ch"));
+  // Too long for the text too: "that cable", as the menu names it.
+  Fixture g(with_cable("Voicemeeter Input (VB-Audio VoiceMeeter VAIO)"));
+  g.Start();
+  g.controller.SetOtherObs({Unnamed(2)}, g.now);
+  g.Feed();
+  CHECK(fits(g.last) && g.last.title == "OBS in another Windows account may send audio to your cable");
+  CHECK(g.last.text == sends_to("that cable"));
+  // An account's name too long for the title: as much of it as fits.
+  Fixture h;
+  h.Start();
+  h.controller.SetOtherObs({{.session = 2, .account = "Maximilian Alexander"}}, h.now);
+  h.Feed();
+  CHECK(fits(h.last) && h.last.title == "OBS in Maximilian…'s account may send audio to your cable");
+  CHECK(h.last.text == sends_to("CABLE In 16ch"));
 }
 
 // --- OBS updates --------------------------------------------------------------------

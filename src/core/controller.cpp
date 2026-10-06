@@ -49,11 +49,11 @@ void Controller::SetObsRunning(bool running, Clock::time_point now) {
   Reconcile(now);
 }
 
-void Controller::SetOtherObs(std::vector<std::string> accounts, Clock::time_point now) {
-  if (stopped_ || accounts == other_obs_) return;
-  other_obs_ = std::move(accounts);
-  backend_.Log(other_obs_.empty() ? std::string("OBS isn't running in another Windows account any more.")
-                                  : std::format("OBS is running in {} other Windows account(s).", other_obs_.size()));
+void Controller::SetOtherObs(std::vector<OtherObs> others, Clock::time_point now) {
+  if (stopped_ || others == other_obs_) return;
+  other_obs_ = std::move(others);
+  backend_.Log(other_obs_.empty() ? std::string("OBS isn't running in another Windows session any more.")
+                                  : std::format("OBS is running in {} other Windows session(s).", other_obs_.size()));
   Reconcile(now);
 }
 

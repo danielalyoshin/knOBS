@@ -26,10 +26,9 @@ struct CoreOptions {
   // Whether OBS is running. Called on the core's thread. Default: an
   // ObsWatch.
   std::function<bool()> obs_running;
-  // The Windows accounts other than this one running OBS, asked right after
-  // obs_running. Default: the same ObsWatch's; none when obs_running is
-  // given without it.
-  std::function<std::vector<std::string>()> other_obs;
+  // OBS running in other Windows sessions, asked right after obs_running.
+  // Default: the same ObsWatch's; none when obs_running is given without it.
+  std::function<std::vector<OtherObs>()> other_obs;
   // How often to ask. OBS takes more than a second and a half from starting
   // to loading its audio sources (M3 findings), so a second is soon enough
   // to make way for it.
