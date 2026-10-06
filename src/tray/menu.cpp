@@ -261,8 +261,9 @@ Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, b
   items.push_back(std::move(status));
   if (auto fix = Fix(snapshot)) items.push_back(std::move(*fix));
   if (!snapshot.other_obs.empty()) {
-    MenuItem other =
-        Command(kIdOtherObs, Escape(std::format("OBS is also open in {}", core::DescribeOtherObs(snapshot.other_obs))));
+    const std::string cable = snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "your cable";
+    MenuItem other = Command(kIdOtherObs, Escape(std::format("OBS in {} may also send audio to {}",
+                                                             core::DescribeOtherObs(snapshot.other_obs), cable)));
     other.enabled = false;
     items.push_back(std::move(other));
   }

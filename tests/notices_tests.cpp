@@ -438,15 +438,18 @@ TEST(NoticesSayObsIsOpenInAnotherAccount) {
   f.controller.SetOtherObs({"Alex"}, f.now);
   f.Feed();
   CHECK(f.state() == State::kRunning);
-  CHECK(f.events == std::vector<std::string>{"OBS is open in Alex's Windows account"});
+  // What it means for the mic, not just that it's open, all of it within
+  // what Windows shows.
+  CHECK(f.events == std::vector<std::string>{"OBS in Alex's account may send audio to CABLE In 16ch"});
   CHECK(f.last.text ==
-        "If it sends audio to CABLE In 16ch, apps here hear it along with your mic. Close OBS there, or turn its "
-        "monitoring off.");
+        "Windows keeps it running while you use this account. If it monitors to that cable, apps here hear it with "
+        "your mic. Close it there or turn monitoring off.");
+  CHECK(FromUtf8(f.last.text).size() <= 160);
   CHECK(!f.last.problem && !f.last.page && f.notifier.badge() == Badge::kNone);
   // Another account too: said again. Then both close.
   f.controller.SetOtherObs({"Alex", "Sam"}, f.now);
   f.Feed();
-  CHECK(f.events.size() == 2 && f.last.title == "OBS is open in 2 other Windows accounts");
+  CHECK(f.events.size() == 2 && f.last.title == "OBS in 2 other Windows accounts may send audio to CABLE In 16ch");
   f.controller.SetOtherObs({}, f.now);
   f.Feed();
   CHECK(f.events.size() == 3 && f.events.back() == "-");
@@ -455,7 +458,7 @@ TEST(NoticesSayObsIsOpenInAnotherAccount) {
   g.Start();
   g.controller.SetOtherObs({""}, g.now);
   g.Feed();
-  CHECK(g.events == std::vector<std::string>{"OBS is open in another Windows account"});
+  CHECK(g.events == std::vector<std::string>{"OBS in another Windows account may send audio to CABLE In 16ch"});
 }
 
 // --- OBS updates --------------------------------------------------------------------

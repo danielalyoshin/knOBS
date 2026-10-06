@@ -228,13 +228,14 @@ Notice FilterWarnings(const core::Snapshot& snapshot, const std::vector<std::str
   return notice;
 }
 
+// Says what OBS in another account means for the mic, not just that it's
+// open: knobs can't tell whether it monitors to the cable.
 Notice OtherObs(const core::Snapshot& snapshot) {
-  const std::string cable = snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "the same cable";
+  const std::string cable = snapshot.chain ? ShortDeviceName(snapshot.chain->cable) : "your cable";
   return {.kind = Kind::kOtherObs,
-          .title = std::format("OBS is open in {}", core::DescribeOtherObs(snapshot.other_obs)),
-          .text = std::format("If it sends audio to {}, apps here hear it along with your mic. Close OBS there, or "
-                              "turn its monitoring off.",
-                              cable)};
+          .title = std::format("OBS in {} may send audio to {}", core::DescribeOtherObs(snapshot.other_obs), cable),
+          .text = "Windows keeps it running while you use this account. If it monitors to that cable, apps here "
+                  "hear it with your mic. Close it there or turn monitoring off."};
 }
 
 std::optional<Notice> Restarted(core::RestartNeed why, const core::Snapshot& snapshot) {

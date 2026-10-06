@@ -191,7 +191,7 @@ TEST(MenuListsTheDesignedItems) {
   other.other_obs = {"Alex"};
   const Menu other_menu = BuildMenu(other, {}, false);
   CHECK(other_menu.items[1].id == kIdOtherObs && !other_menu.items[1].enabled);
-  CHECK(other_menu.items[1].text == "OBS is also open in Alex's Windows account");
+  CHECK(other_menu.items[1].text == "OBS in Alex's account may also send audio to CABLE In 16ch");
 }
 
 TEST(MenuOffersTheFixInBold) {
