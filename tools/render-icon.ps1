@@ -4,10 +4,17 @@
 Renders an SVG into a Windows icon (.ico), as assets/knobs.ico is made.
 
 .DESCRIPTION
-Headless Edge draws the SVG at each size, once on black and once on white.
-The two pictures give each pixel's color and alpha exactly, whatever the
-renderer does with transparency. Sizes below 256 are stored as 32-bit
-bitmaps, which every Windows API reads, and 256 as a PNG.
+Headless Edge draws the SVG at each size, once on black and once on white,
+with 8x8 device pixels to each of the icon's. The two pictures give each
+pixel's color and alpha exactly, whatever the renderer does with
+transparency, and each 8x8 block is averaged into one pixel of the icon, so
+edges are smooth where shapes meet each other as well as where they meet
+the background. Sizes below 256 are stored as 32-bit bitmaps, which every
+Windows API reads, and 256 as a PNG.
+
+The default sizes are small icons (16 px at 100%, as in the tray) and large
+ones (32 px, as in dialogs) at display scales from 100% to 300%, and 256 for
+Explorer. 96 is also the notifications' icon at 100%.
 
 Edge runs with a profile of its own in a temporary folder, so a running Edge
 isn't touched.
@@ -18,12 +25,71 @@ tools\render-icon.ps1 -Svg assets\knobs-app-icon.svg -Out assets\knobs.ico
 param(
     [Parameter(Mandatory = $true)][string]$Svg,
     [Parameter(Mandatory = $true)][string]$Out,
-    [int[]]$Sizes = @(16, 20, 24, 32, 40, 48, 64, 256)
+    [int[]]$Sizes = @(16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80, 96, 256)
 )
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
+Add-Type -ReferencedAssemblies System.Drawing -TypeDefinition @'
+using System;
+using System.Drawing;
+using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 
+public static class IconRender {
+    // A square of a picture's pixels: BGRA, top-down.
+    static byte[] Read(Bitmap bitmap, int left, int side) {
+        BitmapData data = bitmap.LockBits(new Rectangle(left, 0, side, side), ImageLockMode.ReadOnly,
+                                          PixelFormat.Format32bppArgb);
+        byte[] pixels = new byte[side * side * 4];
+        for (int y = 0; y < side; y++) {
+            Marshal.Copy(new IntPtr(data.Scan0.ToInt64() + (long)y * data.Stride), pixels, y * side * 4, side * 4);
+        }
+        bitmap.UnlockBits(data);
+        return pixels;
+    }
+
+    static byte Channel(double value) { return (byte)Math.Round(Math.Min(255.0, Math.Max(0.0, value))); }
+
+    // The icon `size` pixels square at `left`, from the same pixels on black
+    // and on white, drawn with `scale` x `scale` pixels to each of the icon's:
+    // BGRA, top-down, straight alpha. Each pixel is its block's average,
+    // taken premultiplied.
+    public static byte[] Pixels(Bitmap onBlack, Bitmap onWhite, int left, int size, int scale) {
+        int side = size * scale;
+        byte[] black = Read(onBlack, left * scale, side);
+        byte[] white = Read(onWhite, left * scale, side);
+        byte[] pixels = new byte[size * size * 4];
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                double alpha = 0, b = 0, g = 0, r = 0;
+                for (int sy = y * scale; sy < (y + 1) * scale; sy++) {
+                    for (int sx = x * scale; sx < (x + 1) * scale; sx++) {
+                        int i = (sy * side + sx) * 4;
+                        // On black a pixel shows color * alpha; on white, that plus 1 - alpha.
+                        double a = 1 - ((white[i] - black[i]) + (white[i + 1] - black[i + 1]) +
+                                        (white[i + 2] - black[i + 2])) / (3 * 255.0);
+                        alpha += Math.Min(1.0, Math.Max(0.0, a));
+                        b += black[i];
+                        g += black[i + 1];
+                        r += black[i + 2];
+                    }
+                }
+                int o = (y * size + x) * 4;
+                pixels[o + 3] = Channel(alpha / (scale * scale) * 255);
+                if (pixels[o + 3] > 0) {
+                    pixels[o] = Channel(b / alpha);
+                    pixels[o + 1] = Channel(g / alpha);
+                    pixels[o + 2] = Channel(r / alpha);
+                }
+            }
+        }
+        return pixels;
+    }
+}
+'@
+
+$supersample = 8
 $edge = @(
     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
     "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
@@ -31,7 +97,8 @@ $edge = @(
 if (-not $edge) { throw "Microsoft Edge isn't installed." }
 
 $svgUri = ([System.Uri](Resolve-Path $Svg).Path).AbsoluteUri
-$work = Join-Path ([System.IO.Path]::GetTempPath()) ("render-icon-" + [guid]::NewGuid())
+$tag = "render-icon-" + [guid]::NewGuid()
+$work = Join-Path ([System.IO.Path]::GetTempPath()) $tag
 New-Item -ItemType Directory $work | Out-Null
 
 # Every size side by side, a gap apart, on one page.
@@ -45,6 +112,13 @@ foreach ($size in $Sizes) {
 $width = $x
 $height = ($Sizes | Measure-Object -Maximum).Maximum
 
+# The Edge processes this script started.
+function Stop-Edge {
+    Get-CimInstance Win32_Process -Filter "Name = 'msedge.exe'" |
+        Where-Object { $_.CommandLine -like "*$tag*" } |
+        ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
 function Render([string]$background) {
     $images = for ($i = 0; $i -lt $Sizes.Count; $i++) {
         "<img src=""$svgUri"" style=""left:$($lefts[$i])px;width:$($Sizes[$i])px;height:$($Sizes[$i])px"">"
@@ -54,34 +128,25 @@ function Render([string]$background) {
             "img{position:absolute;top:0}</style></head><body>$($images -join '')</body></html>"
     Set-Content -Path $page -Value $html -Encoding UTF8
     $png = Join-Path $work "$background.png"
-    $arguments = @('--headless', '--disable-gpu', '--hide-scrollbars', '--force-device-scale-factor=1',
+    $arguments = @('--headless', '--disable-gpu', '--hide-scrollbars', "--force-device-scale-factor=$supersample",
                    "--user-data-dir=""$work\profile""", "--window-size=$width,$height",
                    "--screenshot=""$png""", ([System.Uri]$page).AbsoluteUri)
-    Start-Process -FilePath $edge -ArgumentList $arguments -Wait -WindowStyle Hidden
-    if (-not (Test-Path $png)) { throw "Edge didn't save $png." }
-    return [System.Drawing.Bitmap]::FromFile($png)
-}
-
-# BGRA, top-down, straight alpha, from the same pixels on black and white.
-function Pixels($onBlack, $onWhite, [int]$left, [int]$size) {
-    $pixels = New-Object 'byte[]' ($size * $size * 4)
-    for ($y = 0; $y -lt $size; $y++) {
-        for ($x = 0; $x -lt $size; $x++) {
-            $b = $onBlack.GetPixel($left + $x, $y)
-            $w = $onWhite.GetPixel($left + $x, $y)
-            # On black a pixel shows color * alpha; on white, that plus 1 - alpha.
-            $alpha = 1 - (($w.R - $b.R) + ($w.G - $b.G) + ($w.B - $b.B)) / (3 * 255.0)
-            $alpha = [math]::Min(1, [math]::Max(0, $alpha))
-            $i = ($y * $size + $x) * 4
-            if ($alpha -gt 0) {
-                $pixels[$i] = [byte][math]::Min(255, [math]::Round($b.B / $alpha))
-                $pixels[$i + 1] = [byte][math]::Min(255, [math]::Round($b.G / $alpha))
-                $pixels[$i + 2] = [byte][math]::Min(255, [math]::Round($b.R / $alpha))
-            }
-            $pixels[$i + 3] = [byte][math]::Round($alpha * 255)
+    $process = Start-Process -FilePath $edge -ArgumentList $arguments -PassThru -WindowStyle Hidden
+    # Edge sometimes stays running after it has saved the picture, so it's
+    # stopped once the picture has stopped growing.
+    $deadline = (Get-Date).AddMinutes(2)
+    $saved = -1
+    while (-not $process.HasExited -and (Get-Date) -lt $deadline) {
+        Start-Sleep -Milliseconds 250
+        if (Test-Path $png) {
+            $length = (Get-Item $png).Length
+            if ($length -gt 0 -and $length -eq $saved) { break }
+            $saved = $length
         }
     }
-    return , $pixels
+    Stop-Edge
+    if (-not (Test-Path $png)) { throw "Edge didn't save $png." }
+    return [System.Drawing.Bitmap]::FromFile($png)
 }
 
 # An icon entry: a 32-bit bitmap with its mask, bottom-up, or a PNG at 256.
@@ -121,11 +186,13 @@ function Entry([byte[]]$pixels, [int]$size) {
 try {
     $onBlack = Render 'black'
     $onWhite = Render 'white'
-    if ($onBlack.Width -lt $width -or $onBlack.Height -lt $height) {
-        throw "Edge drew $($onBlack.Width)x$($onBlack.Height), not $($width)x$height."
+    if ($onBlack.Width -lt $width * $supersample -or $onBlack.Height -lt $height * $supersample -or
+        $onWhite.Width -ne $onBlack.Width -or $onWhite.Height -ne $onBlack.Height) {
+        throw "Edge drew $($onBlack.Width)x$($onBlack.Height) and $($onWhite.Width)x$($onWhite.Height), " +
+              "not $($width * $supersample)x$($height * $supersample)."
     }
     $entries = for ($i = 0; $i -lt $Sizes.Count; $i++) {
-        , (Entry (Pixels $onBlack $onWhite $lefts[$i] $Sizes[$i]) $Sizes[$i])
+        , (Entry ([IconRender]::Pixels($onBlack, $onWhite, $lefts[$i], $Sizes[$i], $supersample)) $Sizes[$i])
     }
     $onBlack.Dispose()
     $onWhite.Dispose()
@@ -146,5 +213,6 @@ try {
     [System.IO.File]::WriteAllBytes((Join-Path (Get-Location) $Out), $file.ToArray())
     Write-Output "Wrote $Out ($($Sizes -join ', ') px)."
 } finally {
+    Stop-Edge
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
 }
