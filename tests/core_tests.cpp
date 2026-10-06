@@ -28,6 +28,7 @@
 #include "core/obs_backend.h"
 #include "core/obs_process.h"
 #include "core/state.h"
+#include "runtime/obs_layout.h"
 #include "test_harness.h"
 #include "util/win_strings.h"
 
@@ -79,7 +80,8 @@ audio::Endpoints DefaultDevices() {
 // Answers from its public fields, which tests change between events, and
 // counts what was asked of it.
 struct FakeBackend : Backend {
-  ObsCheck obs{ObsFound::kYes, {"C:\\obs-studio", {32, 2, 2}}, ""};
+  ObsCheck obs{ObsFound::kYes, {"C:\\obs-studio", {32, 2, 2}}, "",
+               import::ObsConfigRoot{"C:\\Users\\you\\AppData\\Roaming", false, true}};
   std::optional<std::string> config_error;
   import::ActiveObsConfig config = DefaultConfig();
   std::optional<std::string> libobs_error;
@@ -117,7 +119,7 @@ struct FakeBackend : Backend {
     Called();
     return obs;
   }
-  Result<import::ActiveObsConfig> ReadObsConfig(const Settings&, const runtime::ObsInstall&) override {
+  Result<import::ActiveObsConfig> ReadObsConfig(const import::ObsConfigRoot&) override {
     Called();
     if (config_error) return Error{*config_error};
     return config;
@@ -316,6 +318,24 @@ TEST(CoreNeedsSetupUntilTheUserChooses) {
   f.controller.Apply({.mic = "Podcast Mic", .cable = kCableId}, f.now);
   CHECK(f.state() == State::kRunning && f.backend.last_plan->cable.id == kCableId);
   CHECK(f.backend.libobs_starts == 1);
+}
+
+TEST(CoreSaysWhetherOpeningObsFillsItsSettingsFolder) {
+  // OBS's own settings folder: opening OBS once fills it.
+  Fixture f;
+  f.backend.config_error = "OBS has no settings yet.";
+  f.controller.Start(false, f.now);
+  CHECK(f.last().setup == SetupNeed::kObsSettings && f.last().obs_writes_config);
+  // A folder picked elsewhere, as CheckObs found it.
+  f.backend.obs.config = import::ObsConfigRoot{"E:\\Portable\\config", true};
+  f.controller.Reimport(f.now);
+  CHECK(f.last().setup == SetupNeed::kObsSettings && !f.last().obs_writes_config);
+  // No settings folder at all: OBS's settings can't be read either.
+  f.backend.config_error.reset();
+  f.backend.obs.config = Error{"Couldn't find the %AppData% folder."};
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kNeedsSetup && f.last().setup == SetupNeed::kObsSettings);
+  CHECK(f.last().detail == "Couldn't find the %AppData% folder." && f.backend.libobs_starts == 0);
 }
 
 TEST(CorePausesWhileObsRunsAndReimportsWhenItExits) {
@@ -737,38 +757,36 @@ TEST(ObsBackendKeepsToAPickedInstallFolder) {
   CHECK(picked.message.find("isn't a complete OBS Studio install") != std::string::npos);
 }
 
-TEST(ObsBackendKeepsToAPickedSettingsFolder) {
-  // A portable install, so OBS keeps its settings in its config folder.
-  const ScratchDir dir(L"picked-settings");
-  const runtime::ObsInstall install{dir.path / L"obs", {32, 2, 2}};
-  WriteFile(install.root / L"portable_mode.txt", "");
-  const auto write_settings = [](const std::filesystem::path& root, const std::wstring& profile) {
-    WriteFile(root / L"obs-studio" / L"global.ini", "");
-    WriteFile(root / L"obs-studio" / L"user.ini",
-              std::format("[Basic]\nProfile={}\nSceneCollection=Untitled\n", ToUtf8(profile)));
-    WriteFile(root / L"obs-studio" / L"basic" / L"profiles" / profile / L"basic.ini", "");
-  };
+TEST(ObsBackendKeepsToAPickedInstallOfAnUnsupportedObs) {
+  // A portable OBS as CheckObs inspects it, with Windows' own version.dll as
+  // its obs.dll: a version no OBS has, so not one knobs supports.
+  const ScratchDir dir(L"picked-unsupported");
+  const fs::path root = dir.path / L"OBS 31";
+  wchar_t system[MAX_PATH];
+  GetSystemDirectoryW(system, MAX_PATH);
+  fs::create_directories(runtime::BinDir(root));
+  fs::copy_file(fs::path(system) / L"version.dll", runtime::ObsDll(root));
+  WriteFile(runtime::BinDir(root) / (fs::path(runtime::kGraphicsModule) += L".dll"), "");
+  fs::create_directories(runtime::LibobsDataDir(root));
+  for (const std::string_view module : runtime::kObsModules) {
+    WriteFile(runtime::PluginDll(root, module), "");
+    fs::create_directories(runtime::PluginDataDir(root, module));
+  }
+  WriteFile(root / L"portable_mode.txt", "");
+
+  // It stays picked, even where OBS is installed as usual: the check is of
+  // this folder's OBS, and of its settings folder.
   ObsBackend backend({});
-  constexpr std::string_view kOpenObs = "Open OBS once and close it.";
-  // Before OBS has run, opening it once is the fix for its own folder,
-  // picked or not, but not for a folder elsewhere, which OBS doesn't fill.
-  const Settings wrong{.obs_config = dir.path / L"wrong"};
-  const auto unopened = backend.ReadObsConfig({.obs_config = install.root / L"config"}, install);
-  CHECK(!unopened.ok() && unopened.error().find(kOpenObs) != std::string::npos);
-  auto config = backend.ReadObsConfig(wrong, install);
-  CHECK(!config.ok() && config.error().find(kOpenObs) == std::string::npos);
-  // OBS's own settings, made by opening and closing it.
-  write_settings(install.root / L"config", L"Own");
-  CHECK(backend.ReadObsConfig({}, install).ok() && backend.ReadObsConfig({}, install)->profile == "Own");
-  // The wrong folder picked: its error shows, not OBS's own settings, until
-  // the user picks another or goes back to OBS's own.
-  config = backend.ReadObsConfig(wrong, install);
-  CHECK(!config.ok() && config.error() == std::format("OBS has no settings in {}.",
-                                                      ToUtf8(dir.path / L"wrong" / L"obs-studio")));
-  // A picked folder that can be read comes first.
-  write_settings(dir.path / L"picked", L"Picked");
-  const auto picked = backend.ReadObsConfig({.obs_config = dir.path / L"picked"}, install);
-  CHECK(picked.ok() && picked->profile == "Picked");
+  ObsCheck check = backend.CheckObs({.obs_dir = root});
+  CHECK(check.found == ObsFound::kUnsupported && check.install.root == root);
+  CHECK(check.message.find("isn't supported") != std::string::npos);
+  CHECK(check.config.ok() && check.config->path == root / L"config" && check.config->obs_writes_here);
+  // Its settings folder picked, however it's spelled, is OBS's own; another
+  // isn't, so the errors don't suggest opening OBS for it.
+  check = backend.CheckObs({.obs_dir = root, .obs_config = root / L"CONFIG" / L""});
+  CHECK(check.config.ok() && check.config->path == root / L"config" && check.config->obs_writes_here);
+  check = backend.CheckObs({.obs_dir = root, .obs_config = dir.path / L"elsewhere"});
+  CHECK(check.config.ok() && check.config->path == dir.path / L"elsewhere" && !check.config->obs_writes_here);
 }
 
 // --- ObsWatch ----------------------------------------------------------------------

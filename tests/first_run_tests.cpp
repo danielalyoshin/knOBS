@@ -431,10 +431,12 @@ TEST(ProblemsWithObsComeFirst) {
   first_run = ObsUser(snapshot);
   view = first_run.View(snapshot);
   CHECK(view.page == Page::kObsSettings);
-  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Choose folder…", "Open OBS"}));
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…", "Open OBS"}));
   CHECK(view.default_button == kButtonOpenObs);
   CHECK(first_run.Click(kButtonOpenObs, 0, false, snapshot).kind == Kind::kOpenObs);
   CHECK(first_run.Click(kButtonChooseObsSettings, 0, false, snapshot).kind == Kind::kChooseObsSettings);
+  // Settings put there some other way, or a folder that's back.
+  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
   snapshot.obs_running = true;
   view = first_run.View(snapshot);
   CHECK(!FindButton(view, kButtonOpenObs)->enabled && view.default_button == kButtonChooseObsSettings);
@@ -474,27 +476,61 @@ TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
   snapshot.state = State::kNeedsSetup;
   snapshot.setup = SetupNeed::kObsSettings;
   snapshot.obs = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
-  snapshot.own_obs_config = "C:\\Users\\you\\AppData\\Roaming";
   snapshot.detail = "OBS has no settings in E:\\Portable\\config\\obs-studio.";
   snapshot.settings.obs_config = "E:\\Portable\\config";
+  snapshot.obs_writes_config = false;
   first_run = ObsUser(snapshot);
   view = first_run.View(snapshot);
   CHECK(view.page == Page::kObsSettings && Contains(view.content, "aren't in the folder chosen for them."));
-  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Choose folder…", "Use OBS's own folder"}));
+  CHECK(Texts(view.buttons) ==
+        (std::vector<std::string>{"Back", "Try again", "Use OBS's own folder", "Choose folder…"}));
   CHECK(view.default_button == kButtonChooseObsSettings && view.footer.empty());
+  // The same folder again, such as on a drive plugged back in.
+  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
   action = first_run.Click(kButtonOwnObsSettings, 0, false, snapshot);
   CHECK(action.kind == Kind::kApply && !action.settings.obs_config);
-  // OBS's own folder picked, however it's spelled: as with no pick, where
-  // opening OBS once does fill it.
-  for (const char* own : {"C:\\Users\\you\\AppData\\Roaming", "c:\\users\\YOU\\appdata\\roaming\\"}) {
-    snapshot.settings.obs_config = own;
-    view = ObsUser(snapshot).View(snapshot);
-    CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Choose folder…", "Open OBS"}));
-    CHECK(view.default_button == kButtonOpenObs && Contains(view.content, "If your OBS keeps its settings"));
-  }
+  // OBS's own folder picked, however it's spelled (the core says so): as
+  // with no pick, where opening OBS once does fill it.
+  snapshot.settings.obs_config = "c:\\users\\YOU\\appdata\\roaming\\";
+  snapshot.obs_writes_config = true;
+  view = ObsUser(snapshot).View(snapshot);
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…", "Open OBS"}));
+  CHECK(view.default_button == kButtonOpenObs && Contains(view.content, "If your OBS keeps its settings"));
   snapshot.settings.obs_config.reset();
   view = ObsUser(snapshot).View(snapshot);
   CHECK(!FindButton(view, kButtonOwnObsSettings) && FindButton(view, kButtonOpenObs));
+}
+
+TEST(AnUnsupportedObsOffersAnotherFolder) {
+  // OBS updated past what knobs supports: install a supported one, choose
+  // one installed elsewhere, or wait for knobs.
+  core::Snapshot snapshot;
+  snapshot.state = State::kObsUnsupported;
+  snapshot.obs = {"C:\\Program Files\\obs-studio", {33, 0, 0}};
+  snapshot.detail = "OBS 33.0.0 isn't supported.";
+  FirstRun first_run = ObsUser(snapshot);
+  PageView view = first_run.View(snapshot);
+  CHECK(view.page == Page::kObsUnsupported);
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Choose folder…"}));
+  CHECK(view.default_button == kButtonTryAgain);
+  CHECK(Contains(view.content, "If a supported OBS is installed somewhere else, choose that folder."));
+  CHECK(view.content.ends_with(std::format("Or wait for a {} update that supports OBS 33.0.0.", kDisplayName)));
+  CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
+  CHECK(first_run.Click(kButtonTryAgain, 0, false, snapshot).kind == Kind::kReimport);
+
+  // A folder picked for OBS that holds an older one stays picked, with the
+  // ways back. No knobs update supports an older OBS.
+  snapshot.settings.obs_dir = "D:\\OBS 31";
+  snapshot.obs = {"D:\\OBS 31", {31, 1, 4}};
+  snapshot.detail = "OBS 31.1.4 isn't supported.";
+  first_run = ObsUser(snapshot);
+  view = first_run.View(snapshot);
+  CHECK(view.page == Page::kObsUnsupported && Contains(view.content, "the folder chosen for it, D:\\OBS 31."));
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Look for OBS", "Choose folder…"}));
+  CHECK(view.default_button == kButtonChooseObs && !Contains(view.content, "wait"));
+  const FirstRunAction action = first_run.Click(kButtonLookForObs, 0, false, snapshot);
+  CHECK(action.kind == Kind::kApply && !action.settings.obs_dir);
+  CHECK(first_run.Click(kButtonChooseObs, 0, false, snapshot).kind == Kind::kChooseObs);
 }
 
 // --- The second door ----------------------------------------------------------------

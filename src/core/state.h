@@ -163,9 +163,10 @@ struct Snapshot {
   std::string default_input;
   // The OBS install, once found, even if its version isn't supported.
   runtime::ObsInstall obs;
-  // Where that OBS keeps its settings, when known. The first run tells a
-  // picked settings folder that's OBS's own from one elsewhere by it.
-  std::filesystem::path own_obs_config;
+  // Whether OBS keeps its settings in the folder knobs reads
+  // (import::ObsConfigRoot::obs_writes_here), so that opening it once fills
+  // that folder: OBS's own, picked or not, and not one picked elsewhere.
+  bool obs_writes_config = false;
   // The settings this snapshot was worked out with. They lag behind new
   // ones for as long as the core takes to apply them.
   Settings settings;

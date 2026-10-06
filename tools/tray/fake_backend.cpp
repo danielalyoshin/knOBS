@@ -89,7 +89,7 @@ FakeWorld DefaultWorld() {
   FakeWorld world;
   world.obs.found = core::ObsFound::kYes;
   world.obs.install = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
-  world.obs.own_config = "C:\\Users\\you\\AppData\\Roaming";
+  world.obs.config = import::ObsConfigRoot{"C:\\Users\\you\\AppData\\Roaming", false, true};
   world.config.profile = "Untitled";
   world.config.collection = "Untitled";
   world.config.audio.monitoring_device_id = kCable16Id;
@@ -262,21 +262,27 @@ std::string UpdateObs(FakeWorld& world) {
   return world.obs.install.version.ToString();
 }
 
-core::ObsCheck FakeBackend::CheckObs(const core::Settings&) {
+core::ObsCheck FakeBackend::CheckObs(const core::Settings& settings) {
   ++checks_;
   const FakeWorld world = world_->Get();
-  if (checks_ > 1 && world.obs_later) return *world.obs_later;
-  return world.obs;
+  core::ObsCheck check = checks_ > 1 && world.obs_later ? *world.obs_later : world.obs;
+  if (check.found == core::ObsFound::kMissing) return check;
+  // Picked folders, as import::ObsConfigRootFor and the install's check take
+  // them, with the made-up folder OBS keeps its settings in.
+  if (settings.obs_dir) check.install.root = *settings.obs_dir;
+  if (settings.obs_config && !(check.config && import::SameFolder(*settings.obs_config, check.config->path))) {
+    check.config = import::ObsConfigRootAt(*settings.obs_config);
+  }
+  return check;
 }
 
-Result<import::ActiveObsConfig> FakeBackend::ReadObsConfig(const core::Settings& settings,
-                                                           const runtime::ObsInstall&) {
+Result<import::ActiveObsConfig> FakeBackend::ReadObsConfig(const import::ObsConfigRoot& root) {
   const FakeWorld world = world_->Get();
   if (world.config_error) {
-    // As ObsBackend says it: opening OBS only fills the folder it keeps its
-    // settings in.
-    if (settings.obs_config && !import::SameFolder(*settings.obs_config, world.obs.own_config)) {
-      return Error{std::format("OBS has no settings in {}.", ToUtf8(*settings.obs_config / L"obs-studio"))};
+    // As import::FindActiveObsConfig says it: opening OBS only fills the
+    // folder it keeps its settings in.
+    if (!root.obs_writes_here) {
+      return Error{std::format("OBS has no settings in {}.", ToUtf8(root.path / L"obs-studio"))};
     }
     return Error{*world.config_error};
   }

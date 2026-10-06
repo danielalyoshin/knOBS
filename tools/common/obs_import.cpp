@@ -12,19 +12,14 @@ namespace {
 
 namespace fs = std::filesystem;
 
-// Before libobs starts: finds OBS's active profile and scene collection.
+// Before libobs starts: finds OBS's active profile and scene collection, in
+// --obs-config's folder as knobs reads a picked one.
 Result<import::ActiveObsConfig> FindObsConfig(const ImportArgs& args, const runtime::ObsInstall& install) {
-  import::ObsConfigRoot root;
-  if (args.config_dir) {
-    root = import::ObsConfigRootAt(*args.config_dir);
-  } else {
-    auto found = import::FindObsConfigRoot(install.root);
-    if (!found) return Error{found.error()};
-    root = *found;
-  }
-  auto config = import::FindActiveObsConfig(root);
+  auto root = import::ObsConfigRootFor(install.root, args.config_dir);
+  if (!root) return Error{root.error()};
+  auto config = import::FindActiveObsConfig(*root);
   if (!config) return Error{config.error()};
-  Check(true, "OBS settings", std::format("{}{}", ToUtf8(config->settings_file), root.portable ? " (portable)" : ""));
+  Check(true, "OBS settings", std::format("{}{}", ToUtf8(config->settings_file), root->portable ? " (portable)" : ""));
   const import::ProfileAudio& audio = config->audio;
   const std::string monitor = !audio.monitoring_device_name.empty() ? audio.monitoring_device_name
                               : audio.monitoring_device_id == "default" ? std::string("Default")

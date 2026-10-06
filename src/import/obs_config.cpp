@@ -86,17 +86,23 @@ Result<ProfileAudio> ReadProfileAudio(const ObsIni& basic, const fs::path& file)
 }  // namespace
 
 Result<ObsConfigRoot> FindObsConfigRoot(const fs::path& install_root) {
-  if (IsPortableInstall(install_root)) return ObsConfigRoot{install_root / L"config", true};
+  if (IsPortableInstall(install_root)) return ObsConfigRoot{install_root / L"config", true, true};
   auto dirs = GetAppDirs();
   if (!dirs) return Error{dirs.error()};
   // %AppData%, the parent of knobs's own roaming folder.
-  return ObsConfigRoot{dirs->roaming.parent_path(), false};
+  return ObsConfigRoot{dirs->roaming.parent_path(), false, true};
 }
 
 ObsConfigRoot ObsConfigRootAt(const fs::path& folder) {
   const fs::path path = folder.has_filename() ? folder : folder.parent_path();
   const bool portable = AsciiLower(ToUtf8(path.filename())) == "config" && IsPortableInstall(path.parent_path());
   return {path, portable};
+}
+
+Result<ObsConfigRoot> ObsConfigRootFor(const fs::path& install_root, const std::optional<fs::path>& picked) {
+  auto own = FindObsConfigRoot(install_root);
+  if (!picked || (own && SameFolder(*picked, own->path))) return own;
+  return ObsConfigRootAt(*picked);
 }
 
 fs::path SettingsFolderFor(const fs::path& folder) {
@@ -118,12 +124,12 @@ bool SameFolder(const fs::path& a, const fs::path& b) {
          CSTR_EQUAL;
 }
 
-Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root, bool obs_writes_here) {
-  const std::string_view open_obs = obs_writes_here ? " Open OBS once and close it." : "";
+Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
+  const std::string_view open_obs = root.obs_writes_here ? " Open OBS once and close it." : "";
   const fs::path global_file = root.path / L"obs-studio" / L"global.ini";
   if (!Exists(global_file)) {
     return Error{std::format("OBS has no settings in {}{}.{}", ToUtf8(root.path / L"obs-studio"),
-                             obs_writes_here ? " yet" : "", open_obs)};
+                             root.obs_writes_here ? " yet" : "", open_obs)};
   }
   auto global = ObsIni::Read(global_file);
   if (!global) return Error{global.error()};

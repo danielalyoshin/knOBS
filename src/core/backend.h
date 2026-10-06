@@ -25,9 +25,10 @@ struct ObsCheck {
   ObsFound found = ObsFound::kMissing;
   runtime::ObsInstall install;  // Unless missing.
   std::string message;          // Why not, unless found.
-  // Where that OBS keeps its settings (import::FindObsConfigRoot), unless
-  // missing or unknown.
-  std::filesystem::path own_config;
+  // The settings folder to read for that install, unless missing: the one
+  // picked (Settings::obs_config), else where that OBS keeps them
+  // (import::ObsConfigRootFor).
+  Result<import::ObsConfigRoot> config = Error{};
 };
 
 struct MicImport {
@@ -63,11 +64,10 @@ class Backend {
  public:
   virtual ~Backend() = default;
 
-  // Finds the OBS install and checks its version.
+  // Finds the OBS install and its settings folder, and checks its version.
   virtual ObsCheck CheckObs(const Settings& settings) = 0;
-  // The active OBS profile and scene collection.
-  virtual Result<import::ActiveObsConfig> ReadObsConfig(const Settings& settings,
-                                                        const runtime::ObsInstall& install) = 0;
+  // The active OBS profile and scene collection in `root` (ObsCheck::config).
+  virtual Result<import::ActiveObsConfig> ReadObsConfig(const import::ObsConfigRoot& root) = 0;
   // Starts libobs from `install`'s runtime copy, at the profile's sample rate
   // and channels. Once, before anything below. After a failure, again only
   // if LibobsCanRetry says so.

@@ -162,7 +162,7 @@ void Controller::Refresh() {
   import_.reset();
   plan_.reset();
   obs_install_ = {};
-  own_obs_config_.clear();
+  obs_writes_config_ = false;
   profile_cable_id_.clear();
   profile_cable_name_.clear();
   const auto fail = [this](State state, std::string detail, SetupNeed setup = SetupNeed::kNone,
@@ -173,7 +173,7 @@ void Controller::Refresh() {
   const ObsCheck obs = backend_.CheckObs(settings_);
   if (obs.found == ObsFound::kMissing) return fail(State::kObsMissing, obs.message);
   obs_install_ = obs.install;
-  own_obs_config_ = obs.own_config;
+  obs_writes_config_ = obs.config && obs.config->obs_writes_here;
   if (obs.found == ObsFound::kUnsupported) return fail(State::kObsUnsupported, obs.message);
   // libobs stays loaded until the process ends (runtime::ObsRuntime).
   if (libobs_ && obs.install.version != libobs_->version) {
@@ -182,7 +182,8 @@ void Controller::Refresh() {
                             libobs_->version.ToString(), obs.install.version.ToString(), kDisplayName),
                 SetupNeed::kNone, RestartNeed::kObsUpdated);
   }
-  auto config = backend_.ReadObsConfig(settings_, obs.install);
+  if (!obs.config) return fail(State::kNeedsSetup, obs.config.error(), SetupNeed::kObsSettings);
+  auto config = backend_.ReadObsConfig(*obs.config);
   if (!config) return fail(State::kNeedsSetup, config.error(), SetupNeed::kObsSettings);
   const import::ProfileAudio& audio = config->audio;
   profile_cable_id_ = audio.monitoring_device_id;
@@ -288,7 +289,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   next.inputs = devices_.mics;
   next.default_input = devices_.default_mic;
   next.obs = obs_install_;
-  next.own_obs_config = own_obs_config_;
+  next.obs_writes_config = obs_writes_config_;
   next.settings = settings_;
   if (import_) {
     next.mics = import_->mics;

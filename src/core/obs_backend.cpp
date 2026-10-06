@@ -30,13 +30,6 @@ Result<runtime::ObsInstall> FindInstalledObs() {
   return runtime::FindObsInstall(candidates);
 }
 
-// OBS's settings where OBS keeps them for `install_root`.
-Result<import::ActiveObsConfig> ReadOwnObsConfig(const fs::path& install_root) {
-  auto root = import::FindObsConfigRoot(install_root);
-  if (!root) return Error{root.error()};
-  return import::FindActiveObsConfig(*root);
-}
-
 // What pruning did, for the log. Nothing when there was nothing to prune.
 void LogPruned(const runtime::PrunedCopies& pruned, runtime::ObsLog& log) {
   if (pruned.busy) {
@@ -78,15 +71,18 @@ ObsBackend::~ObsBackend() {
 
 ObsCheck ObsBackend::CheckObs(const Settings& settings) {
   ObsCheck check;
-  // A picked folder OBS has gone from stays the user's to change: the first
-  // run offers to pick another or to look for OBS as with no pick.
+  // A picked folder OBS has gone from, or that holds an OBS knobs doesn't
+  // support, stays the user's to change: the first run offers to pick
+  // another or to look for OBS as with no pick.
   auto install = settings.obs_dir ? runtime::InspectObsInstall(*settings.obs_dir) : FindInstalledObs();
   if (!install) {
     check.message = install.error();
     return check;
   }
   check.install = *install;
-  if (auto own = import::FindObsConfigRoot(install->root)) check.own_config = own->path;
+  // The same for a picked settings folder. Opening OBS fills only the folder
+  // it keeps its settings in, so the errors suggest it only for that one.
+  check.config = import::ObsConfigRootFor(install->root, settings.obs_config);
   if (!runtime::IsSupportedObsVersion(install->version)) {
     check.found = ObsFound::kUnsupported;
     check.message = runtime::UnsupportedObsMessage(install->version.ToString());
@@ -96,16 +92,8 @@ ObsCheck ObsBackend::CheckObs(const Settings& settings) {
   return check;
 }
 
-Result<import::ActiveObsConfig> ObsBackend::ReadObsConfig(const Settings& settings,
-                                                          const runtime::ObsInstall& install) {
-  if (!settings.obs_config) return ReadOwnObsConfig(install.root);
-  // As for the install: a picked folder that can't be read stays picked
-  // until the user picks another or goes back to OBS's own. Opening OBS
-  // fills only the folder it keeps its settings in, so the error suggests
-  // it only for that one.
-  const auto own = import::FindObsConfigRoot(install.root);
-  const bool own_folder = own && import::SameFolder(*settings.obs_config, own->path);
-  return import::FindActiveObsConfig(import::ObsConfigRootAt(*settings.obs_config), own_folder);
+Result<import::ActiveObsConfig> ObsBackend::ReadObsConfig(const import::ObsConfigRoot& root) {
+  return import::FindActiveObsConfig(root);
 }
 
 Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) {

@@ -44,8 +44,7 @@ class ObsBackend : public Backend {
   ~ObsBackend() override;
 
   ObsCheck CheckObs(const Settings& settings) override;
-  Result<import::ActiveObsConfig> ReadObsConfig(const Settings& settings,
-                                                const runtime::ObsInstall& install) override;
+  Result<import::ActiveObsConfig> ReadObsConfig(const import::ObsConfigRoot& root) override;
   Status StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) override;
   bool LibobsCanRetry() override;
   Result<MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override;

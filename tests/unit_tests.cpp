@@ -15,6 +15,7 @@
 #include <format>
 #include <fstream>
 #include <future>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -861,6 +862,59 @@ TEST(ConfigUsesExistingLocationsOnly) {
   CHECK(!import::FindActiveObsConfig({dir.path, true}).ok());
 }
 
+TEST(ConfigRootKeepsToAPickedFolder) {
+  // A portable install, so OBS keeps its settings in its config folder.
+  TempDir dir(L"picked-settings");
+  const fs::path install = dir.path / L"obs";
+  WriteFile(install / L"portable_mode.txt", "");
+  const auto write_settings = [](const fs::path& root, const std::wstring& profile) {
+    WriteFile(root / L"obs-studio" / L"global.ini", "");
+    WriteFile(root / L"obs-studio" / L"user.ini",
+              std::format("[Basic]\nProfile={}\nSceneCollection=Untitled\n", ToUtf8(profile)));
+    WriteFile(root / L"obs-studio" / L"basic" / L"profiles" / profile / L"basic.ini", "");
+  };
+  const auto read = [&install](const std::optional<fs::path>& picked) -> Result<import::ActiveObsConfig> {
+    auto root = import::ObsConfigRootFor(install, picked);
+    if (!root) return Error{root.error()};
+    return import::FindActiveObsConfig(*root);
+  };
+  const auto own = import::ObsConfigRootFor(install, std::nullopt);
+  CHECK(own.ok() && own->path == install / L"config" && own->portable && own->obs_writes_here);
+  // OBS's own folder picked, however it's spelled, is as good as no pick.
+  for (const fs::path& spelled : {install / L"CONFIG" / L"", install / L"bin" / L".." / L"config"}) {
+    const auto root = import::ObsConfigRootFor(install, spelled);
+    CHECK(root.ok() && root->obs_writes_here && own.ok() && root->path == own->path);
+  }
+  // Before OBS has run, opening it once is the fix for its own folder,
+  // picked or not, but not for a folder elsewhere, which OBS doesn't fill.
+  constexpr std::string_view kOpenObs = "Open OBS once and close it.";
+  const fs::path elsewhere = dir.path / L"elsewhere";
+  auto config = read(install / L"Config");
+  CHECK(!config.ok() && config.error().find(kOpenObs) != std::string::npos);
+  config = read(elsewhere);
+  CHECK(!config.ok() && config.error().find(kOpenObs) == std::string::npos);
+  // OBS's own settings, made by opening and closing it.
+  write_settings(install / L"config", L"Own");
+  config = read(std::nullopt);
+  CHECK(config.ok() && config->profile == "Own");
+  // The folder elsewhere picked: its error shows, not OBS's own settings,
+  // until the user picks another or goes back to OBS's own.
+  config = read(elsewhere);
+  CHECK(!config.ok() && config.error() == std::format("OBS has no settings in {}.", ToUtf8(elsewhere / L"obs-studio")));
+  // A picked folder that can be read comes first.
+  write_settings(dir.path / L"picked", L"Picked");
+  config = read(dir.path / L"picked");
+  CHECK(config.ok() && config->profile == "Picked");
+
+  // Without a marker, OBS keeps its settings in %AppData%. Only the paths
+  // are worked out here; nothing there is read.
+  const auto roaming = import::ObsConfigRootFor(dir.path / L"installed", std::nullopt);
+  CHECK(roaming.ok() && !roaming->portable && roaming->obs_writes_here);
+  if (!roaming) return;
+  CHECK(import::ObsConfigRootFor(dir.path / L"installed", roaming->path / L"")->obs_writes_here);
+  CHECK(!import::ObsConfigRootFor(dir.path / L"installed", install / L"config")->obs_writes_here);
+}
+
 TEST(SameFolderComparesAsWindowsDoes) {
   CHECK(import::SameFolder(L"C:\\Users\\you\\AppData\\Roaming", L"c:\\users\\YOU\\appdata\\roaming\\"));
   CHECK(import::SameFolder(L"E:/Portable/config", L"E:\\Portable\\config"));
@@ -872,10 +926,11 @@ TEST(SameFolderComparesAsWindowsDoes) {
 
 TEST(ConfigReportsWhatsMissing) {
   TempDir dir(L"missing");
-  auto none = import::FindActiveObsConfig({dir.path, false});
+  auto none = import::FindActiveObsConfig({dir.path, false, true});
   CHECK(!none.ok() && none.error().find("Open OBS once and close it.") != std::string::npos);
   // A folder OBS doesn't keep its settings in: opening OBS wouldn't fill it.
-  none = import::FindActiveObsConfig({dir.path, false}, false);
+  // A folder given directly counts as one unless it's known to be OBS's own.
+  none = import::FindActiveObsConfig(import::ObsConfigRootAt(dir.path));
   CHECK(!none.ok() && none.error().ends_with("obs-studio.") && none.error().find("Open OBS") == std::string::npos);
   WriteObsConfig(dir.path, {{"global.ini", ""}, {"user.ini", "[Basic]\nProfile=Gone\nSceneCollection=C\n"}});
   auto gone = import::FindActiveObsConfig({dir.path, false});

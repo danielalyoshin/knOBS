@@ -8,9 +8,9 @@
 #include <utility>
 
 #include "app_info.h"
-#include "import/obs_config.h"
 #include "runtime/obs_version.h"
 #include "tray/menu.h"
+#include "util/win_strings.h"
 
 namespace knobs::tray {
 namespace {
@@ -313,12 +313,27 @@ PageView ObsUnsupported(const core::Snapshot& snapshot) {
   PageView view;
   view.icon = PageIcon::kWarning;
   view.instruction = "This version of OBS isn't supported";
-  view.content = std::format("{}{}Install a supported version from <a href=\"{}\">OBS's releases on GitHub</a>, "
-                             "and try again. Or wait for a {} update that supports OBS {}.",
-                             snapshot.detail, snapshot.detail.empty() ? "" : "\n\n", kObsReleasesUrl, kDisplayName,
-                             snapshot.obs.version.ToString());
+  const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
+  // Only an OBS newer than knobs supports can be waited for.
+  const std::string wait = snapshot.obs.version >= runtime::kFirstUnsupportedObs
+                               ? std::format(" Or wait for a {} update that supports OBS {}.", kDisplayName,
+                                             snapshot.obs.version.ToString())
+                               : "";
   view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
-  view.default_button = kButtonTryAgain;
+  if (snapshot.settings.obs_dir) {
+    // A folder picked before: it stays picked until the user says otherwise.
+    view.content = std::format("{}{}This is the OBS in the folder chosen for it, {}. Choose the folder of a "
+                               "supported OBS, or let {} look for OBS where OBS's installer puts it.{}",
+                               snapshot.detail, gap, ToUtf8(snapshot.obs.root), kDisplayName, wait);
+    view.buttons.push_back(Button(kButtonLookForObs, "Look for OBS"));
+    view.default_button = kButtonChooseObs;
+  } else {
+    view.content = std::format("{}{}Install a supported version from <a href=\"{}\">OBS's releases on GitHub</a>, "
+                               "and try again. If a supported OBS is installed somewhere else, choose that folder.{}",
+                               snapshot.detail, gap, kObsReleasesUrl, wait);
+    view.default_button = kButtonTryAgain;
+  }
+  view.buttons.push_back(Button(kButtonChooseObs, "Choose folder…"));
   return view;
 }
 
@@ -327,16 +342,19 @@ PageView ObsSettings(const core::Snapshot& snapshot) {
   view.icon = PageIcon::kWarning;
   view.instruction = "Can't read OBS's settings";
   const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonChooseObsSettings, "Choose folder…")};
+  // Try again reads the same folder again: on a drive plugged back in, or
+  // with settings put there some other way.
+  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
   // A folder picked before, other than the one OBS keeps its settings in,
   // stays picked until the user says otherwise. Opening OBS wouldn't fill
   // it, so the page doesn't suggest that. OBS's own folder picked is as good
-  // as no pick.
-  if (snapshot.settings.obs_config && !import::SameFolder(*snapshot.settings.obs_config, snapshot.own_obs_config)) {
+  // as no pick (import::ObsConfigRootFor).
+  if (snapshot.settings.obs_config && !snapshot.obs_writes_config) {
     view.content = std::format("{}{}OBS's settings aren't in the folder chosen for them. Choose the folder that holds "
                                "obs-studio now, or use the one OBS keeps them in.",
                                snapshot.detail, gap);
     view.buttons.push_back(Button(kButtonOwnObsSettings, "Use OBS's own folder"));
+    view.buttons.push_back(Button(kButtonChooseObsSettings, "Choose folder…"));
     view.default_button = kButtonChooseObsSettings;
     return view;
   }
@@ -344,6 +362,7 @@ PageView ObsSettings(const core::Snapshot& snapshot) {
                              "choose that folder: the one that holds obs-studio.",
                              snapshot.detail, gap);
   view.footer = ObsOpenLine(snapshot);
+  view.buttons.push_back(Button(kButtonChooseObsSettings, "Choose folder…"));
   if (ObsInstalled(snapshot)) view.buttons.push_back(Button(kButtonOpenObs, "Open OBS", !snapshot.obs_running));
   view.default_button = ObsInstalled(snapshot) && !snapshot.obs_running ? kButtonOpenObs : kButtonChooseObsSettings;
   return view;

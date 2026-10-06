@@ -104,8 +104,7 @@ class FakeBackend : public core::Backend {
       : world_(std::move(world)), log_(std::move(log)), pick_by_number_(pick_by_number) {}
 
   core::ObsCheck CheckObs(const core::Settings& settings) override;
-  Result<import::ActiveObsConfig> ReadObsConfig(const core::Settings& settings,
-                                                const runtime::ObsInstall& install) override;
+  Result<import::ActiveObsConfig> ReadObsConfig(const import::ObsConfigRoot& root) override;
   Status StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) override;
   bool LibobsCanRetry() override { return true; }
   Result<core::MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override;
