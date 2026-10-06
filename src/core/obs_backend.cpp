@@ -1,11 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "core/obs_backend.h"
 
+#include <windows.h>
+
 #include <format>
 #include <utility>
 
 #include "app_info.h"
 #include "audio/audio_devices.h"
+#include "runtime/obs_layout.h"
 #include "runtime/obs_version.h"
 #include "util/win_strings.h"
 
@@ -68,6 +71,13 @@ Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import:
   if (!host) return Error{host.error()};
   host_ = std::move(*host);
   return Ok{};
+}
+
+bool ObsBackend::LibobsCanRetry() {
+  // A failed start frees obs.dll, which unloads it unless a module libobs
+  // opened keeps it loaded. Then libobs's state, and the modules', stayed
+  // with it, and starting again would run on them.
+  return GetModuleHandleW(runtime::kObsDll.data()) == nullptr;
 }
 
 Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, std::string_view pick) {

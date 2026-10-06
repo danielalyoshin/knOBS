@@ -77,6 +77,9 @@ struct FakeBackend : Backend {
   std::optional<std::string> config_error;
   import::ActiveObsConfig config = DefaultConfig();
   std::optional<std::string> libobs_error;
+  // Whether libobs can start again after libobs_error. It can't once the
+  // failure left a module loaded.
+  bool libobs_can_retry = true;
   std::optional<std::string> import_error;
   // The scene collection's mics. The only one is picked without a pick;
   // otherwise the pick names one.
@@ -97,6 +100,7 @@ struct FakeBackend : Backend {
   uint64_t packets = 0;
 
   std::function<void()> on_call;
+  std::function<void()> on_start_libobs;
   std::function<void(bool chain_running)> on_destroy;
 
   ~FakeBackend() override {
@@ -114,10 +118,15 @@ struct FakeBackend : Backend {
   }
   Status StartLibobs(const runtime::ObsInstall&, const import::ProfileAudio& audio) override {
     Called();
+    if (on_start_libobs) on_start_libobs();
     ++libobs_starts;
     libobs_audio = audio;
     if (libobs_error) return Error{*libobs_error};
     return Ok{};
+  }
+  bool LibobsCanRetry() override {
+    Called();
+    return libobs_can_retry;
   }
   Result<MicImport> ImportMic(const import::ActiveObsConfig&, std::string_view pick) override {
     Called();
@@ -181,7 +190,8 @@ struct Fixture {
   Clock::time_point now{};
 
   explicit Fixture(Settings settings = {})
-      : controller(backend, std::move(settings), [this](const Snapshot& snapshot) { published.push_back(snapshot); }) {}
+      : controller(backend, std::move(settings), [this](const Snapshot& snapshot) { published.push_back(snapshot); },
+                   {.clock = [this] { return now; }}) {}
 
   const Snapshot& last() const { return published.back(); }
   State state() const { return published.back().state; }
@@ -333,6 +343,44 @@ TEST(CoreCanKeepRunningWhileObsRuns) {
   CHECK(f.state() == State::kRunning && f.backend.chain_running);
   f.controller.Apply({}, f.now);
   CHECK(f.state() == State::kPausedForObs && !f.backend.chain_running);
+}
+
+TEST(CoreImportsAgainOnlyForSettingsThatChangeTheImport) {
+  Fixture f;
+  f.backend.devices.outputs.push_back({"CABLE-A Input (VB-Audio Cable A)", kOtherCableId});
+  f.controller.Start(true, f.now);
+  CHECK(f.state() == State::kPausedForObs && f.backend.imports == 1);
+
+  // A change made in OBS while it's open waits for OBS to exit, even if a
+  // setting changes meanwhile.
+  f.backend.collection[0].chain_key = "chain-2";
+  Settings settings{.pause_for_obs = false};
+  f.controller.Apply(settings, f.now);
+  CHECK(f.state() == State::kRunning && f.backend.imports == 1 && f.last().chain_revision == 1);
+  settings.cable = kOtherCableId;
+  f.controller.Apply(settings, f.now);
+  CHECK(f.backend.imports == 1 && f.backend.chain_starts == 2 && f.backend.last_plan->cable.id == kOtherCableId);
+  CHECK(f.backend.last_plan->chain_key == "chain-1" && f.last().chain_revision == 1);
+  f.controller.SetObsRunning(false, f.now);
+  CHECK(f.backend.imports == 2 && f.last().chain_revision == 2 && f.backend.last_plan->chain_key == "chain-2");
+
+  // What's imported: the mic, the install and OBS's settings folder.
+  settings.mic = "Mic/Aux";
+  f.controller.Apply(settings, f.now);
+  settings.obs_dir = "D:\\obs-studio";
+  f.controller.Apply(settings, f.now);
+  settings.obs_config = "D:\\obs-studio\\config";
+  f.controller.Apply(settings, f.now);
+  CHECK(f.backend.imports == 5 && f.state() == State::kRunning && f.backend.chain_starts == 3);
+
+  // The profile's cable is now the default device, which is no cable.
+  f.backend.config.audio.monitoring_device_id = "default";
+  f.controller.Reimport(f.now);
+  CHECK(f.backend.imports == 6 && f.state() == State::kRunning);
+  settings.cable.clear();
+  f.controller.Apply(settings, f.now);
+  CHECK(f.backend.imports == 6 && f.state() == State::kNeedsSetup && f.last().setup == SetupNeed::kCable);
+  CHECK(!f.backend.chain_running);
 }
 
 TEST(CoreSnapshotHasWhatTheTrayOffers) {
@@ -528,6 +576,20 @@ TEST(CoreRebuildsAChainThatStopsGettingAudio) {
   CHECK(f.state() == State::kRunning && f.backend.chain_starts == 4);
 }
 
+TEST(CoreTimesTheWatchdogFromTheChainsStart) {
+  Fixture f;
+  // The first start makes the runtime copy, which can take seconds.
+  f.backend.on_start_libobs = [&f] { f.now += 5s; };
+  f.backend.flowing = false;  // The mic's first packets haven't come yet.
+  f.controller.Start(false, f.now);
+  // The core's thread ticks right after.
+  f.controller.Tick(f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_running);
+  f.backend.flowing = true;
+  f.Advance(10s);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
+}
+
 TEST(CoreStaysPausedUntilResumed) {
   Fixture f;
   f.controller.Start(false, f.now);
@@ -574,6 +636,22 @@ TEST(CoreReportsWhatStopsLibobsOrTheImport) {
     f.backend.libobs_error.reset();
     f.controller.Reimport(f.now);
     CHECK(f.state() == State::kRunning && f.backend.libobs_starts == 2);
+  }
+  {
+    // A module that loaded keeps obs.dll in the process: only a restart
+    // tries again, which the tray does by itself.
+    Fixture f;
+    f.backend.libobs_error = "The OBS module obs-filters failed to initialize. The log has details.";
+    f.backend.libobs_can_retry = false;
+    f.controller.Start(false, f.now);
+    CHECK(f.state() == State::kFailed && f.last().detail == *f.backend.libobs_error);
+    f.backend.libobs_error.reset();
+    f.controller.Reimport(f.now);
+    CHECK(f.state() == State::kRestartNeeded && f.last().restart == RestartNeed::kNone);
+    f.controller.SetObsRunning(true, f.now);
+    f.controller.SetObsRunning(false, f.now);
+    f.controller.Apply({.mic = "Mic/Aux"}, f.now);
+    CHECK(f.state() == State::kRestartNeeded && f.backend.libobs_starts == 1 && !f.backend.chain_running);
   }
   {
     Fixture f;

@@ -24,8 +24,11 @@ inline std::filesystem::path BinDir(const std::filesystem::path& root) {
   return root / L"bin" / L"64bit";
 }
 
+// libobs, in bin\64bit.
+inline constexpr std::wstring_view kObsDll = L"obs.dll";
+
 inline std::filesystem::path ObsDll(const std::filesystem::path& root) {
-  return BinDir(root) / L"obs.dll";
+  return BinDir(root) / kObsDll;
 }
 
 inline std::filesystem::path PluginBinDir(const std::filesystem::path& root) {

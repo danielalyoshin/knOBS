@@ -86,9 +86,18 @@ void Controller::Reimport(Clock::time_point now) {
 
 void Controller::Apply(const Settings& settings, Clock::time_point now) {
   if (stopped_) return;
+  // Only these are imported. Importing again for the cable or pausing would
+  // read OBS's settings, maybe while it's open, and a change made there would
+  // come with the new settings as if they had made it.
+  const bool reimport = settings.obs_dir != settings_.obs_dir || settings.obs_config != settings_.obs_config ||
+                        settings.mic != settings_.mic;
   settings_ = settings;
   ClearFailures();
-  Refresh();
+  if (reimport) {
+    Refresh();
+  } else if (import_ && import_->mic) {
+    PlanChain();
+  }
   Reconcile(now);
 }
 
@@ -178,8 +187,18 @@ void Controller::Refresh() {
   profile_cable_id_ = audio.monitoring_device_id;
   profile_cable_name_ = audio.monitoring_device_name;
   if (!libobs_) {
+    if (libobs_spent_) {
+      // Only a new process can try again, and the tray starts one by itself.
+      return fail(State::kRestartNeeded,
+                  std::format("libobs failed to start, and can't start again while {0} runs. {0} has to restart to "
+                              "try again.",
+                              kDisplayName));
+    }
     const Status started = backend_.StartLibobs(obs.install, audio);
-    if (!started) return fail(State::kFailed, started.error());
+    if (!started) {
+      libobs_spent_ = !backend_.LibobsCanRetry();
+      return fail(State::kFailed, started.error());
+    }
     libobs_ = Libobs{obs.install.version, audio.sample_rate, audio.speakers, audio.channel_setup};
   } else if (audio.sample_rate != libobs_->sample_rate || audio.speakers != libobs_->speakers) {
     // OBS restarts for this too (OBSBasic::GetRestartRequirements).
@@ -204,14 +223,22 @@ void Controller::Refresh() {
     chain_key_ = mic.chain_key;
     ++chain_revision_;
   }
+  PlanChain();
+}
 
-  const std::string cable = settings_.cable.empty() ? audio.monitoring_device_id : settings_.cable;
+void Controller::PlanChain() {
+  // After an import that found the mic, the cable is the only problem left.
+  problem_.reset();
+  plan_.reset();
+  const std::string cable = settings_.cable.empty() ? profile_cable_id_ : settings_.cable;
   if (SameId(cable, kDefaultDevice)) {
-    return fail(State::kNeedsSetup,
-                "The OBS profile monitors to the default playback device, which is usually speakers. Choose the "
-                "cable to send the mic to.",
-                SetupNeed::kCable);
+    problem_ = Problem{State::kNeedsSetup,
+                       "The OBS profile monitors to the default playback device, which is usually speakers. Choose "
+                       "the cable to send the mic to.",
+                       SetupNeed::kCable};
+    return;
   }
+  const import::ImportedMic& mic = *import_->mic;
   plan_ = ChainPlan{mic.source_json, mic.chain_key, mic.load_callbacks(), {"", cable}};
 }
 
@@ -228,12 +255,14 @@ void Controller::Reconcile(Clock::time_point now) {
     plan.cable.name = CableName();
     const Status started = backend_.StartChain(plan);
     if (started) {
+      // Not `now`: the import or the chain's start may have taken seconds.
+      const Clock::time_point started_at = timing_.clock();
       loaded_ = std::move(plan);
       loaded_default_mic_ = devices_.default_mic;
-      running_since_ = now;
-      last_audio_ = now;
+      running_since_ = started_at;
+      last_audio_ = started_at;
       last_packets_ = 0;
-      next_check_ = now + timing_.watchdog_interval;
+      next_check_ = started_at + timing_.watchdog_interval;
       backend_.Log(std::format("Loaded the chain: {}", FormatChain(*next.chain, false)));
     } else {
       chain_error_ = started.error();

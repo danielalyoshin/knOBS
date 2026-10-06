@@ -65,8 +65,13 @@ class Backend {
   virtual Result<import::ActiveObsConfig> ReadObsConfig(const Settings& settings,
                                                         const runtime::ObsInstall& install) = 0;
   // Starts libobs from `install`'s runtime copy, at the profile's sample rate
-  // and channels. Once, before anything below.
+  // and channels. Once, before anything below. After a failure, again only
+  // if LibobsCanRetry says so.
   virtual Status StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) = 0;
+  // After StartLibobs failed: whether it can run again in this process. Not
+  // once libobs had opened a module: libobs never unloads module DLLs, and
+  // they keep obs.dll and its state loaded (runtime::ObsRuntime).
+  virtual bool LibobsCanRetry() = 0;
   // Reads the scene collection, picks the mic and runs the pre-flight checks.
   virtual Result<MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) = 0;
   // Doesn't need libobs.

@@ -51,7 +51,8 @@ struct Fixture {
                    Notifier::Options options = {})
       : world(std::make_shared<tools::SharedWorld>(std::move(start))),
         backend(world, [](std::string_view) {}),
-        controller(backend, std::move(settings), [this](const core::Snapshot& s) { pending.push_back(s); }),
+        controller(backend, std::move(settings), [this](const core::Snapshot& s) { pending.push_back(s); },
+                   {.clock = [this] { return now; }}),
         notifier(options) {}
 
   State state() const { return controller.snapshot().state; }

@@ -61,7 +61,9 @@ enum class State {
   kObsUnsupported,
   // OBS was updated, or its profile's sample rate or channels changed.
   // knobs has to restart to follow: libobs can't be reloaded in a running
-  // process, and OBS restarts for a format change too.
+  // process, and OBS restarts for a format change too. Also, with
+  // RestartNeed::kNone, when trying again after libobs failed to start with
+  // a module loaded: only a new process can.
   kRestartNeeded,
   // Something went wrong that knobs can't fix by itself; Snapshot::detail
   // says what. Tried again on a re-import and when OBS exits; a chain that

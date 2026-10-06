@@ -15,9 +15,10 @@
 
 namespace knobs::core {
 
-// The core's decisions. It has no threads or clock of its own: it's told
-// what happened and when, and drives a Backend. Not thread-safe; the Core
-// runs it on one thread.
+// The core's decisions. It has no threads of its own: it's told what
+// happened and when, and drives a Backend. It reads the time itself only
+// when a chain has started (Timing::clock). Not thread-safe; the Core runs
+// it on one thread.
 //
 // After every event it works out the state from what it knows, in this
 // order: problems with OBS, its settings or the import; a chain that failed
@@ -51,6 +52,10 @@ class Controller {
                                                  std::chrono::seconds(60)};
     // A chain that has had audio for this long starts the waits over.
     Clock::duration healthy_after = std::chrono::seconds(30);
+    // Read once a chain has started, since the watchdog times it from then.
+    // That can be seconds after the event that started it: the first start
+    // makes the runtime copy. Tests on a fake clock pass theirs.
+    std::function<Clock::time_point()> clock = Clock::now;
   };
 
   Controller(Backend& backend, Settings settings, Publish publish, Timing timing = {});
@@ -64,7 +69,8 @@ class Controller {
   void Pause(Clock::time_point now);
   void Resume(Clock::time_point now);
   void Reimport(Clock::time_point now);
-  // New settings, then a re-import.
+  // New settings, then a re-import if the install, OBS's settings folder or
+  // the mic changed.
   void Apply(const Settings& settings, Clock::time_point now);
   // Does whatever is due: settled device changes, the watchdog, a retry.
   void Tick(Clock::time_point now);
@@ -92,6 +98,9 @@ class Controller {
 
   // Finds OBS, reads its settings, starts libobs if needed, and imports.
   void Refresh();
+  // Works out the cable and the chain to run, from an import that found the
+  // mic and the settings.
+  void PlanChain();
   // Works out the state, starts or stops the chain to match, publishes.
   void Reconcile(Clock::time_point now);
   Snapshot Decide(Clock::time_point now) const;
@@ -114,6 +123,9 @@ class Controller {
   std::optional<Problem> problem_;
   runtime::ObsInstall obs_install_;
   std::optional<Libobs> libobs_;
+  // libobs failed to start, and can't start again in this process
+  // (Backend::LibobsCanRetry).
+  bool libobs_spent_ = false;
   std::optional<MicImport> import_;
   std::optional<ChainPlan> plan_;
   std::string profile_cable_id_;

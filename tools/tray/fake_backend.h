@@ -105,6 +105,7 @@ class FakeBackend : public core::Backend {
   Result<import::ActiveObsConfig> ReadObsConfig(const core::Settings& settings,
                                                 const runtime::ObsInstall& install) override;
   Status StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) override;
+  bool LibobsCanRetry() override { return true; }
   Result<core::MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override;
   audio::Endpoints ListDevices() override { return world_->Get().devices; }
   Status StartChain(const core::ChainPlan& plan) override;

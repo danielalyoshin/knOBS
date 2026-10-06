@@ -38,6 +38,7 @@ class ObsBackend : public Backend {
   Result<import::ActiveObsConfig> ReadObsConfig(const Settings& settings,
                                                 const runtime::ObsInstall& install) override;
   Status StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) override;
+  bool LibobsCanRetry() override;
   Result<MicImport> ImportMic(const import::ActiveObsConfig& config, std::string_view pick) override;
   audio::Endpoints ListDevices() override;
   Status StartChain(const ChainPlan& plan) override;
