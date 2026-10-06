@@ -81,4 +81,36 @@ class EndpointPlayer {
   std::unique_ptr<Stream> stream_;
 };
 
+// A playback endpoint's sample clock, timed against QueryPerformanceCounter: a
+// shared-mode stream kept fed with silence, so nothing is heard, whose
+// IAudioClock pairs each stream position with the QPC time it was taken at.
+// The engine consumes a stream at the endpoint's own rate, which for a USB
+// interface is its sample clock. Use on a thread with COM initialized.
+class EndpointClock {
+ public:
+  struct Reading {
+    uint64_t qpc_ns = 0;  // NowNs's clock.
+    double device_s = 0;  // The stream's position in seconds at the nominal rate.
+  };
+
+  static Result<std::unique_ptr<EndpointClock>> Open(const std::string& device_id);
+  ~EndpointClock();
+  EndpointClock(const EndpointClock&) = delete;
+  EndpointClock& operator=(const EndpointClock&) = delete;
+
+  uint32_t sample_rate() const;
+  // Tops the silence up to 100 ms and reads the clock. Call at least every
+  // 50 ms.
+  Result<Reading> Poll();
+  // Polls after the first that found less than 10 ms queued: the stream may
+  // have run dry in between, which stalls its position.
+  uint64_t low_polls() const;
+
+ private:
+  struct Stream;
+  EndpointClock();
+
+  std::unique_ptr<Stream> stream_;
+};
+
 }  // namespace knobs::tools

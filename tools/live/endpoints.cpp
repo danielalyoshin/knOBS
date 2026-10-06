@@ -254,4 +254,69 @@ Status EndpointPlayer::Write(const float* interleaved, uint32_t frames) {
   return Ok{};
 }
 
+struct EndpointClock::Stream {
+  ComPtr<IAudioClient> client;
+  ComPtr<IAudioRenderClient> render;
+  ComPtr<IAudioClock> clock;
+  uint32_t sample_rate = 0;
+  uint64_t frequency = 0;  // IAudioClock's position units per second.
+  uint64_t polls = 0;
+  uint64_t low_polls = 0;
+};
+
+EndpointClock::EndpointClock() : stream_(std::make_unique<Stream>()) {}
+
+EndpointClock::~EndpointClock() {
+  if (stream_->client) stream_->client->Stop();
+}
+
+Result<std::unique_ptr<EndpointClock>> EndpointClock::Open(const std::string& device_id) {
+  std::unique_ptr<EndpointClock> timer(new EndpointClock());
+  Stream& stream = *timer->stream_;
+  MixFormat format(nullptr, &CoTaskMemFree);
+  const Status activated = ActivateClient(device_id, EndpointFlow::kPlayback, stream.client, format);
+  if (!activated) return Error{activated.error()};
+  stream.sample_rate = format->nSamplesPerSec;
+  UINT64 frequency = 0;
+  HRESULT hr = stream.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, kBufferDuration, 0, format.get(), nullptr);
+  if (SUCCEEDED(hr)) hr = stream.client->GetService(IID_PPV_ARGS(&stream.render));
+  if (SUCCEEDED(hr)) hr = stream.client->GetService(IID_PPV_ARGS(&stream.clock));
+  if (SUCCEEDED(hr)) hr = stream.clock->GetFrequency(&frequency);
+  if (FAILED(hr) || frequency == 0) {
+    return Error{std::format("Couldn't open a stream to time {} ({}).", device_id, HrText(hr))};
+  }
+  stream.frequency = frequency;
+  // Queue the first silence before starting, so the stream never runs dry.
+  const auto first = timer->Poll();
+  if (!first) return Error{first.error()};
+  hr = stream.client->Start();
+  if (FAILED(hr)) return Error{std::format("Couldn't start playing to {} ({}).", device_id, HrText(hr))};
+  return timer;
+}
+
+uint32_t EndpointClock::sample_rate() const { return stream_->sample_rate; }
+
+uint64_t EndpointClock::low_polls() const { return stream_->low_polls; }
+
+Result<EndpointClock::Reading> EndpointClock::Poll() {
+  Stream& stream = *stream_;
+  UINT32 padding = 0;
+  HRESULT hr = stream.client->GetCurrentPadding(&padding);
+  if (FAILED(hr)) return Error{std::format("The stream stopped ({}).", HrText(hr))};
+  if (stream.polls++ > 0 && padding < stream.sample_rate / 100) ++stream.low_polls;
+  const UINT32 target = stream.sample_rate / 10;
+  if (padding < target) {
+    const UINT32 frames = target - padding;
+    BYTE* buffer = nullptr;
+    hr = stream.render->GetBuffer(frames, &buffer);
+    if (SUCCEEDED(hr)) hr = stream.render->ReleaseBuffer(frames, AUDCLNT_BUFFERFLAGS_SILENT);
+    if (FAILED(hr)) return Error{std::format("Couldn't queue silence ({}).", HrText(hr))};
+  }
+  UINT64 position = 0;
+  UINT64 qpc_position = 0;  // 100 ns units
+  hr = stream.clock->GetPosition(&position, &qpc_position);
+  if (FAILED(hr)) return Error{std::format("Couldn't read the stream's position ({}).", HrText(hr))};
+  return Reading{qpc_position * 100, static_cast<double>(position) / static_cast<double>(stream.frequency)};
+}
+
 }  // namespace knobs::tools

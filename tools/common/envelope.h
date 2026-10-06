@@ -38,6 +38,9 @@ class Envelope {
 
   // Root-mean-square amplitude per bin; 0 where nothing was added.
   std::vector<double> Amplitude() const;
+  // Whether any frame fell in the bin. A recording's timestamps jitter, so
+  // now and then one skips a bin.
+  bool Filled(size_t bin) const { return count_[bin] > 0; }
 
   uint64_t origin_ns() const { return origin_ns_; }
   uint64_t bin_ns() const { return bin_ns_; }
