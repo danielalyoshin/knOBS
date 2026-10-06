@@ -8,24 +8,22 @@
 #include <cstdint>
 #include <cwchar>
 #include <string_view>
-
-#include "runtime/obs_layout.h"
+#include <utility>
 
 namespace knobs::core {
 namespace {
 
-// The mutex an installed OBS creates. A portable one adds its settings
-// folder to "OBSStudioPortable" instead.
-constexpr wchar_t kObsMutex[] = L"OBSStudioCore";
 constexpr std::chrono::seconds kScanInterval{2};
 
 using QuerySystemInformation = NTSTATUS(NTAPI*)(SYSTEM_INFORMATION_CLASS, PVOID, ULONG, PULONG);
 constexpr NTSTATUS kInfoLengthMismatch = static_cast<NTSTATUS>(0xC0000004);
 
-// The process list as the kernel reports it, the call CreateToolhelp32Snapshot
+// The processes named `exe` in Windows session `session`: the list has every
+// session's, and another user's can't be opened from this one. It reads the
+// process list as the kernel reports it, the call CreateToolhelp32Snapshot
 // makes, without the snapshot's copy of it: about a millisecond for 250
 // processes, a third of a snapshot read in full. Empty if it fails.
-std::vector<DWORD> ProcessesNamed(std::wstring_view exe, std::vector<std::byte>& buffer) {
+std::vector<DWORD> ProcessesNamed(std::wstring_view exe, DWORD session, std::vector<std::byte>& buffer) {
   static const auto query = reinterpret_cast<QuerySystemInformation>(
       GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "NtQuerySystemInformation"));
   std::vector<DWORD> found;
@@ -42,7 +40,8 @@ std::vector<DWORD> ProcessesNamed(std::wstring_view exe, std::vector<std::byte>&
     const auto* process = reinterpret_cast<const SYSTEM_PROCESS_INFORMATION*>(buffer.data() + offset);
     const std::wstring_view name(process->ImageName.Buffer ? process->ImageName.Buffer : L"",
                                  process->ImageName.Length / sizeof(wchar_t));
-    if (name.size() == exe.size() && _wcsnicmp(name.data(), exe.data(), exe.size()) == 0) {
+    if (process->SessionId == session && name.size() == exe.size() &&
+        _wcsnicmp(name.data(), exe.data(), exe.size()) == 0) {
       found.push_back(static_cast<DWORD>(reinterpret_cast<uintptr_t>(process->UniqueProcessId)));
     }
     if (process->NextEntryOffset == 0) break;
@@ -51,8 +50,8 @@ std::vector<DWORD> ProcessesNamed(std::wstring_view exe, std::vector<std::byte>&
   return found;
 }
 
-bool ObsMutexExists() {
-  const HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, kObsMutex);
+bool MutexExists(const std::wstring& name) {
+  const HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, name.c_str());
   if (mutex) {
     CloseHandle(mutex);
     return true;
@@ -62,6 +61,12 @@ bool ObsMutexExists() {
 }
 
 }  // namespace
+
+ObsWatch::ObsWatch(ObsNames names) : names_(std::move(names)) {
+  DWORD session = 0;
+  ProcessIdToSessionId(GetCurrentProcessId(), &session);
+  session_ = session;
+}
 
 ObsWatch::~ObsWatch() {
   for (void* process : processes_) CloseHandle(process);
@@ -74,7 +79,7 @@ bool ObsWatch::Running() {
     processes_.erase(processes_.begin() + static_cast<std::ptrdiff_t>(i));
     process_ids_.erase(process_ids_.begin() + static_cast<std::ptrdiff_t>(i));
   }
-  const bool mutex = ObsMutexExists();
+  const bool mutex = MutexExists(names_.mutex);
   const auto now = std::chrono::steady_clock::now();
   if (now >= next_scan_ || (mutex && !had_mutex_)) Scan(now);
   had_mutex_ = mutex;
@@ -84,13 +89,13 @@ bool ObsWatch::Running() {
 void ObsWatch::Scan(std::chrono::steady_clock::time_point now) {
   next_scan_ = now + kScanInterval;
   unopened_ = false;
-  for (const DWORD id : ProcessesNamed(runtime::kObsExe, buffer_)) {
+  for (const DWORD id : ProcessesNamed(names_.exe, session_, buffer_)) {
     if (std::find(process_ids_.begin(), process_ids_.end(), id) != process_ids_.end()) continue;
     if (const HANDLE process = OpenProcess(SYNCHRONIZE, FALSE, id)) {
       processes_.push_back(process);
       process_ids_.push_back(id);
     } else {
-      unopened_ = true;
+      unopened_ = true;  // Still this session's OBS: it counts until a scan doesn't find it.
     }
   }
 }

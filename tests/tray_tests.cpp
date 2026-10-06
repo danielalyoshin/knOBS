@@ -29,12 +29,16 @@
 
 namespace knobs::test {
 
-// Started as obs64.exe: notes its working directory next to itself.
+// The stand-in for obs64.exe: this binary under a name of its own, so that a
+// knobs or an OBS that's running doesn't take it for OBS.
+constexpr wchar_t kStandInObs[] = L"knobs-tests-obs.exe";
+
+// Started as the stand-in: notes its working directory next to itself.
 bool RunAsStandInObs() {
   wchar_t path[MAX_PATH * 2] = {};
   GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
   const std::filesystem::path exe = path;
-  if (AsciiLower(ToUtf8(exe.filename())) != "obs64.exe") return false;
+  if (AsciiLower(ToUtf8(exe.filename())) != ToUtf8(kStandInObs)) return false;
   std::ofstream(exe.parent_path() / L"working-directory.txt", std::ios::binary)
       << ToUtf8(std::filesystem::current_path());
   return true;
@@ -412,7 +416,7 @@ TEST(StartWithWindowsUsesTheRunKey) {
 // --- Open OBS -----------------------------------------------------------------------
 
 TEST(OpenObsStartsInItsBinFolder) {
-  // An install whose obs64.exe is this binary, which then only notes where
+  // An install with this binary as its program, which then only notes where
   // it was started (RunAsStandInObs).
   const fs::path root = fs::temp_directory_path() / std::format(L"knobs-tests-{}-obs", GetCurrentProcessId());
   const fs::path bin = root / L"bin" / L"64bit";
@@ -421,9 +425,9 @@ TEST(OpenObsStartsInItsBinFolder) {
   fs::create_directories(bin);
   wchar_t self[MAX_PATH * 2] = {};
   GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
-  CHECK(fs::copy_file(self, bin / L"obs64.exe", ec));
+  CHECK(fs::copy_file(self, bin / test::kStandInObs, ec));
 
-  CHECK(OpenObs(root).ok());
+  CHECK(OpenObs(root, test::kStandInObs).ok());
   const fs::path note = bin / L"working-directory.txt";
   std::string started_in;
   for (int i = 0; i < 200 && started_in.empty(); ++i) {
@@ -432,7 +436,7 @@ TEST(OpenObsStartsInItsBinFolder) {
     started_in.assign(std::istreambuf_iterator<char>(file), {});
   }
   CHECK(!started_in.empty() && fs::equivalent(fs::path(FromUtf8(started_in)), bin, ec));
-  CHECK(!OpenObs(root / L"elsewhere").ok());
+  CHECK(!OpenObs(root / L"elsewhere", test::kStandInObs).ok());
   CHECK(!OpenObs({}).ok());
 
   // Gone once the stand-in has exited.

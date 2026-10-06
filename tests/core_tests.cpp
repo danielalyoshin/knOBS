@@ -17,6 +17,7 @@
 #include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/backend.h"
@@ -32,6 +33,7 @@ using namespace knobs;
 using namespace knobs::core;
 using namespace std::chrono_literals;
 using Clock = Controller::Clock;
+namespace fs = std::filesystem;
 
 constexpr char kMicId[] = "{0.0.1.00000000}.{mic}";
 constexpr char kHeadsetId[] = "{0.0.1.00000000}.{headset}";
@@ -680,11 +682,58 @@ TEST(CorePublishesOnlyChanges) {
 
 // --- ObsWatch ----------------------------------------------------------------------
 
+// Names for OBS of this run's own, so that the OBSes the tests make up aren't
+// seen by a knobs or an OBS that's running, or by another run of the tests.
+ObsNames TestObsNames() {
+  return {.mutex = std::format(L"knobs-tests-{}-obs", GetCurrentProcessId()),
+          .exe = std::format(L"knobs-tests-{}-obs.exe", GetCurrentProcessId())};
+}
+
+// Runs ping.exe under the name `names.exe`, with `security` for its process,
+// until End() or the end of the test. It would last 30 s.
+struct PingAsObs {
+  explicit PingAsObs(const ObsNames& names, SECURITY_ATTRIBUTES* security = nullptr) {
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    wchar_t system[MAX_PATH];
+    GetSystemDirectoryW(system, MAX_PATH);
+    const fs::path exe = dir / names.exe;
+    fs::copy_file(fs::path(system) / L"ping.exe", exe, fs::copy_options::overwrite_existing, ec);
+    std::wstring command = names.exe + L" -n 30 127.0.0.1";
+    STARTUPINFOW startup = {sizeof(startup)};
+    started = !ec && CreateProcessW(exe.c_str(), command.data(), security, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
+                                    nullptr, &startup, &process);
+  }
+  ~PingAsObs() {
+    End();
+    if (started) {
+      CloseHandle(process.hThread);
+      CloseHandle(process.hProcess);
+    }
+    std::error_code ec;
+    fs::remove_all(dir, ec);
+  }
+  void End() {
+    if (!started) return;
+    TerminateProcess(process.hProcess, 0);
+    WaitForSingleObject(process.hProcess, 5000);
+  }
+
+  const fs::path dir = fs::temp_directory_path() / std::format(L"knobs-tests-{}-obs", GetCurrentProcessId());
+  PROCESS_INFORMATION process = {};
+  bool started = false;
+};
+
+TEST(ObsWatchLooksForObsByDefault) {
+  CHECK(ObsNames{}.mutex == L"OBSStudioCore" && ObsNames{}.exe == L"obs64.exe");
+}
+
 TEST(ObsWatchSeesObsByItsMutex) {
-  if (ObsWatch().Running()) return;  // OBS is running for real; nothing to tell apart.
-  ObsWatch watch;
+  const ObsNames names = TestObsNames();
+  ObsWatch watch(names);
+  CHECK(!watch.Running());
   // What an installed OBS creates first thing.
-  const HANDLE mutex = CreateMutexW(nullptr, FALSE, L"OBSStudioCore");
+  const HANDLE mutex = CreateMutexW(nullptr, FALSE, names.mutex.c_str());
   CHECK(mutex != nullptr);
   CHECK(watch.Running());
   CloseHandle(mutex);
@@ -692,33 +741,51 @@ TEST(ObsWatchSeesObsByItsMutex) {
 }
 
 TEST(ObsWatchSeesObsByItsProcessUntilItEnds) {
-  if (ObsWatch().Running()) return;
-  // Any program named obs64.exe counts, as a portable OBS does.
-  namespace fs = std::filesystem;
-  const fs::path dir = fs::temp_directory_path() / std::format(L"knobs-tests-{}-obs", GetCurrentProcessId());
-  std::error_code ec;
-  fs::create_directories(dir, ec);
-  const fs::path exe = dir / L"obs64.exe";
-  wchar_t system[MAX_PATH];
-  GetSystemDirectoryW(system, MAX_PATH);
-  fs::copy_file(fs::path(system) / L"ping.exe", exe, fs::copy_options::overwrite_existing, ec);
-  CHECK(!ec);
-  std::wstring command = L"obs64.exe -n 30 127.0.0.1";
-  STARTUPINFOW startup = {sizeof(startup)};
-  PROCESS_INFORMATION process = {};
-  const bool started = CreateProcessW(exe.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
-                                      nullptr, &startup, &process);
-  CHECK(started);
-  if (started) {
-    ObsWatch watch;  // Scans on its first call.
-    CHECK(watch.Running());
-    TerminateProcess(process.hProcess, 0);
-    WaitForSingleObject(process.hProcess, 5000);
-    CHECK(!watch.Running());  // Its handle says so, without another scan.
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
+  // Any program with OBS's name counts, as a portable OBS does.
+  const ObsNames names = TestObsNames();
+  PingAsObs obs(names);
+  CHECK(obs.started);
+  if (!obs.started) return;
+  ObsWatch watch(names);  // Scans on its first call.
+  CHECK(watch.Running());
+  obs.End();
+  CHECK(!watch.Running());  // Its handle says so, without another scan.
+}
+
+TEST(ObsWatchCountsAProcessItCantOpenUntilItEnds) {
+  // No one may open it: an empty DACL.
+  SECURITY_DESCRIPTOR descriptor;
+  ACL acl;
+  InitializeSecurityDescriptor(&descriptor, SECURITY_DESCRIPTOR_REVISION);
+  InitializeAcl(&acl, sizeof(acl), ACL_REVISION);
+  SetSecurityDescriptorDacl(&descriptor, TRUE, &acl, FALSE);
+  SECURITY_ATTRIBUTES security = {sizeof(security), &descriptor, FALSE};
+  const ObsNames names = TestObsNames();
+  PingAsObs obs(names, &security);
+  CHECK(obs.started);
+  if (!obs.started) return;
+  // Unless this process may open any process (SeDebugPrivilege).
+  if (const HANDLE opened = OpenProcess(SYNCHRONIZE, FALSE, obs.process.dwProcessId)) {
+    CloseHandle(opened);
+    return;
   }
-  fs::remove_all(dir, ec);
+  ObsWatch watch(names);
+  CHECK(watch.Running());
+  obs.End();
+  // Without a handle, the next scan tells.
+  std::this_thread::sleep_for(2100ms);
+  CHECK(!watch.Running());
+}
+
+TEST(ObsWatchKeepsToItsSession) {
+  // Another user's OBS runs in a session of its own, and its process can't
+  // be opened from this one. services.exe stands in for it: it runs in
+  // session 0, where no one signs in.
+  DWORD session = 0;
+  if (!ProcessIdToSessionId(GetCurrentProcessId(), &session) || session == 0) return;
+  ObsNames names = TestObsNames();
+  names.exe = L"services.exe";
+  CHECK(!ObsWatch(names).Running());
 }
 
 // --- Core --------------------------------------------------------------------------
