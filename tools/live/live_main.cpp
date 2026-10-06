@@ -3,9 +3,10 @@
 // knobs-live: runs knobs's live audio path (a source through an OBS filter
 // chain, and libobs's monitor into a virtual cable) and measures it.
 //
-// Only --run and --measure-mic open the mic, and they say so first. What the
-// tool records from devices is reduced to a 1 ms energy envelope and a peak
-// level as it arrives; no audio is kept or written anywhere.
+// Only --run, --measure-mic and --measure-drift with --mic open the mic, and
+// they say so first. What the tool records from devices is reduced to a 1 ms
+// energy envelope and a peak level as it arrives, or with --measure-drift,
+// dropped unread; no audio is kept or written anywhere.
 
 #include <windows.h>
 #include <objbase.h>
@@ -75,11 +76,14 @@ Modes (pick one):
                            into --output for s seconds, restarting libobs's monitor
                            every --restart-every seconds as {0} does in silence, and
                            measures each restart's gap and the latency between them
-                           on --listen.
+                           on --listen. Use a chain that passes the tone through: a
+                           gate or noise suppression may cut it, which reads as gaps.
   --measure-drift <s>      Mic-free. Times --output's sample clock against
                            QueryPerformanceCounter for s seconds, playing silence into
                            it, and reports how fast or slow it runs (ppm). Run it on a
                            cable and on an interface's playback side at the same time.
+                           With --mic, opens that mic instead and times it, dropping
+                           what it records unread.
   --run <s>                Opens the mic. Runs it through the chain into --output for
                            s seconds (Ctrl+C stops), reporting the level that arrives
                            on --listen each second.
@@ -687,16 +691,19 @@ ClockFit FitClock(const std::vector<EndpointClock::Reading>& readings, size_t be
   return {(slope - 1) * 1e6, std::sqrt(residual / n) * 1e6};
 }
 
-// Mic-free: times the output's sample clock against QueryPerformanceCounter,
-// the clock libobs and WASAPI timestamps use, playing silence into it.
-// Positive drift means the device consumes more samples per second than its
+// Times a device's sample clock against QueryPerformanceCounter, the clock
+// libobs and WASAPI timestamps use: a playback device playing silence, or a
+// recording device, which opens it, with what it records dropped unread.
+// Positive drift means the device runs more samples per second than its
 // nominal rate.
-void MeasureDrift(const Options& options, const audio::AudioDevice& output) {
-  auto clock = EndpointClock::Open(output.id);
+void MeasureDrift(const Options& options, const audio::AudioDevice& device, EndpointFlow flow) {
+  auto clock = EndpointClock::Open(device.id, flow);
   if (!clock) return Check(false, "clock", clock.error());
   Report(Outcome::kNote, "measure",
-         std::format("timing \"{}\" ({} Hz) against QueryPerformanceCounter for {} s, playing silence into it",
-                     output.name, (*clock)->sample_rate(), options.seconds));
+         std::format("timing \"{}\" ({} Hz) against QueryPerformanceCounter for {} s, {}", device.name,
+                     (*clock)->sample_rate(), options.seconds,
+                     flow == EndpointFlow::kPlayback ? "playing silence into it"
+                                                     : "dropping what it records unread"));
   std::vector<EndpointClock::Reading> readings;
   const auto start = std::chrono::steady_clock::now();
   const auto end = start + std::chrono::seconds(options.seconds);
@@ -718,20 +725,36 @@ void MeasureDrift(const Options& options, const audio::AudioDevice& output) {
   if (g_interrupted) return Report(Outcome::kNote, "drift", "interrupted");
   const ClockFit fit = FitClock(readings, 0, readings.size());
   std::string quarters;
+  double slowest = 0, fastest = 0;
+  std::vector<double> residuals;
   for (int q = 0; q < kWindows; ++q) {
     const ClockFit part = FitClock(readings, readings.size() * q / kWindows, readings.size() * (q + 1) / kWindows);
     quarters += std::format("{}{:+.2f}", quarters.empty() ? "" : ", ", part.ppm);
+    slowest = q == 0 ? part.ppm : std::min(slowest, part.ppm);
+    fastest = q == 0 ? part.ppm : std::max(fastest, part.ppm);
+    residuals.push_back(part.residual_us);
   }
+  // How far apart honest quarters can be: their readings' jitter over a
+  // quarter's length, in ppm, with room to spare.
+  std::sort(residuals.begin(), residuals.end());
+  const double tolerance = std::max(5.0, 10 * residuals[kWindows / 2] / (options.seconds / double{kWindows}));
   const double hz = (*clock)->sample_rate() * (1 + fit.ppm / 1e6);
   Check(readings.size() >= 3, "drift",
         std::format("{:+.2f} ppm against QPC, {:+.1f} ms per hour ({:.3f} Hz); per quarter: {} ppm; {} readings "
                     "within {:.1f} us of the line",
                     fit.ppm, fit.ppm * 3.6, hz, quarters, readings.size(), fit.residual_us));
-  if ((*clock)->low_polls() > 0) {
+  // A recording stream's first readings have thrown the whole fit off
+  // (2026-10-06, the iD4's mic), leaving the later quarters in agreement.
+  if (fastest - slowest > tolerance) {
+    Report(Outcome::kWarn, "drift",
+           std::format("the quarters disagree by more than {:.0f} ppm, so a bad reading may have thrown the result "
+                       "off; trust the quarters that agree",
+                       tolerance));
+  }
+  if ((*clock)->glitches() > 0) {
     Report(Outcome::kWarn, "clock",
-           std::format("{} polls found less than 10 ms queued; the stream may have run dry, which skews the "
-                       "result",
-                       (*clock)->low_polls()));
+           std::format("{} polls found the stream {}, which skews the result", (*clock)->glitches(),
+                       flow == EndpointFlow::kPlayback ? "nearly dry" : "had dropped audio"));
   }
 }
 
@@ -859,6 +882,12 @@ bool CheckCable(const Options& options, const audio::AudioDevice& output, const 
 void RunMode(runtime::ObsHost& host, const Options& options, const std::optional<import::ActiveObsConfig>& config,
              const std::vector<audio::AudioDevice>& mics, const std::vector<audio::AudioDevice>& outputs) {
   const runtime::ObsApi& api = host.api();
+  if (options.mode == Mode::kMeasureDrift && !options.mic.empty()) {
+    auto mic = audio::FindDevice(mics, options.mic, "recording device");
+    if (!mic) return Check(false, "devices", mic.error());
+    Report(Outcome::kOk, "mic", std::format("opening \"{}\" to time its clock; nothing it records is kept", mic->name));
+    return MeasureDrift(options, *mic, EndpointFlow::kRecording);
+  }
   Chain chain;
   std::string output_query = options.output.empty() ? "CABLE Input" : options.output;
   std::string mic_query = options.mic.empty() ? "default" : options.mic;
@@ -887,7 +916,7 @@ void RunMode(runtime::ObsHost& host, const Options& options, const std::optional
   if (output && options.mode == Mode::kMeasureDrift) {
     // Silence: whoever else uses the device hears nothing of it.
     Report(Outcome::kOk, "devices", std::format("timing \"{}\"", output->name));
-    return MeasureDrift(options, *output);
+    return MeasureDrift(options, *output, EndpointFlow::kPlayback);
   }
   auto listen = audio::FindDevice(mics, options.listen, "recording device");
   if (!output || !listen) {

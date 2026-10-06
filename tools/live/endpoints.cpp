@@ -256,12 +256,13 @@ Status EndpointPlayer::Write(const float* interleaved, uint32_t frames) {
 
 struct EndpointClock::Stream {
   ComPtr<IAudioClient> client;
-  ComPtr<IAudioRenderClient> render;
+  ComPtr<IAudioRenderClient> render;    // Playback.
+  ComPtr<IAudioCaptureClient> capture;  // Recording.
   ComPtr<IAudioClock> clock;
   uint32_t sample_rate = 0;
   uint64_t frequency = 0;  // IAudioClock's position units per second.
   uint64_t polls = 0;
-  uint64_t low_polls = 0;
+  uint64_t glitches = 0;
 };
 
 EndpointClock::EndpointClock() : stream_(std::make_unique<Stream>()) {}
@@ -270,42 +271,63 @@ EndpointClock::~EndpointClock() {
   if (stream_->client) stream_->client->Stop();
 }
 
-Result<std::unique_ptr<EndpointClock>> EndpointClock::Open(const std::string& device_id) {
+Result<std::unique_ptr<EndpointClock>> EndpointClock::Open(const std::string& device_id, EndpointFlow flow) {
   std::unique_ptr<EndpointClock> timer(new EndpointClock());
   Stream& stream = *timer->stream_;
   MixFormat format(nullptr, &CoTaskMemFree);
-  const Status activated = ActivateClient(device_id, EndpointFlow::kPlayback, stream.client, format);
+  const Status activated = ActivateClient(device_id, flow, stream.client, format);
   if (!activated) return Error{activated.error()};
   stream.sample_rate = format->nSamplesPerSec;
   UINT64 frequency = 0;
   HRESULT hr = stream.client->Initialize(AUDCLNT_SHAREMODE_SHARED, 0, kBufferDuration, 0, format.get(), nullptr);
-  if (SUCCEEDED(hr)) hr = stream.client->GetService(IID_PPV_ARGS(&stream.render));
+  if (SUCCEEDED(hr)) {
+    hr = flow == EndpointFlow::kPlayback ? stream.client->GetService(IID_PPV_ARGS(&stream.render))
+                                         : stream.client->GetService(IID_PPV_ARGS(&stream.capture));
+  }
   if (SUCCEEDED(hr)) hr = stream.client->GetService(IID_PPV_ARGS(&stream.clock));
   if (SUCCEEDED(hr)) hr = stream.clock->GetFrequency(&frequency);
   if (FAILED(hr) || frequency == 0) {
     return Error{std::format("Couldn't open a stream to time {} ({}).", device_id, HrText(hr))};
   }
   stream.frequency = frequency;
-  // Queue the first silence before starting, so the stream never runs dry.
-  const auto first = timer->Poll();
-  if (!first) return Error{first.error()};
+  if (stream.render) {
+    // Queue the first silence before starting, so the stream never runs dry.
+    const auto first = timer->Poll();
+    if (!first) return Error{first.error()};
+  }
   hr = stream.client->Start();
-  if (FAILED(hr)) return Error{std::format("Couldn't start playing to {} ({}).", device_id, HrText(hr))};
+  if (FAILED(hr)) return Error{std::format("Couldn't start a stream on {} ({}).", device_id, HrText(hr))};
   return timer;
 }
 
 uint32_t EndpointClock::sample_rate() const { return stream_->sample_rate; }
 
-uint64_t EndpointClock::low_polls() const { return stream_->low_polls; }
+uint64_t EndpointClock::glitches() const { return stream_->glitches; }
 
 Result<EndpointClock::Reading> EndpointClock::Poll() {
   Stream& stream = *stream_;
+  HRESULT hr = S_OK;
+  if (stream.capture) {
+    // Drop what was recorded, unread.
+    UINT32 packet = 0;
+    while (SUCCEEDED(hr = stream.capture->GetNextPacketSize(&packet)) && packet > 0) {
+      BYTE* data = nullptr;
+      UINT32 frames = 0;
+      DWORD flags = 0;
+      hr = stream.capture->GetBuffer(&data, &frames, &flags, nullptr, nullptr);
+      if (FAILED(hr)) break;
+      if (stream.polls > 0 && (flags & AUDCLNT_BUFFERFLAGS_DATA_DISCONTINUITY)) ++stream.glitches;
+      stream.capture->ReleaseBuffer(frames);
+    }
+    ++stream.polls;
+    if (FAILED(hr)) return Error{std::format("The stream stopped ({}).", HrText(hr))};
+  }
   UINT32 padding = 0;
-  HRESULT hr = stream.client->GetCurrentPadding(&padding);
+  if (stream.render) hr = stream.client->GetCurrentPadding(&padding);
   if (FAILED(hr)) return Error{std::format("The stream stopped ({}).", HrText(hr))};
-  if (stream.polls++ > 0 && padding < stream.sample_rate / 100) ++stream.low_polls;
+  if (stream.render && stream.polls++ > 0 && padding < stream.sample_rate / 100) ++stream.glitches;
   const UINT32 target = stream.sample_rate / 10;
-  if (padding < target) {
+  if (stream.render && padding < target) {
     const UINT32 frames = target - padding;
     BYTE* buffer = nullptr;
     hr = stream.render->GetBuffer(frames, &buffer);
