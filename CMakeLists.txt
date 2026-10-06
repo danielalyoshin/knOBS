@@ -45,6 +45,7 @@ add_library(knobs_runtime STATIC
   src/runtime/runtime_copy.cpp
   src/util/app_dirs.cpp
   src/util/json.cpp
+  src/util/pick_folder.cpp
   src/util/text_file.cpp
   src/util/win_strings.cpp
 )
@@ -60,8 +61,11 @@ configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h 
 # The tray app's UI, run by knobs.exe, and by knobs-tray on a fake core.
 add_library(knobs_tray STATIC
   src/tray/autostart.cpp
+  src/tray/first_run.cpp
+  src/tray/first_run_dialog.cpp
   src/tray/menu.cpp
   src/tray/menu_theme.cpp
+  src/tray/open_obs.cpp
   src/tray/settings_file.cpp
   src/tray/single_instance.cpp
   src/tray/tray_app.cpp
@@ -119,7 +123,7 @@ add_executable(knobs-tray
 target_include_directories(knobs-tray PRIVATE assets)
 target_link_libraries(knobs-tray PRIVATE knobs_tray knobs_tools dwmapi ole32 windowscodecs)
 
-add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp)
+add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp)
 target_link_libraries(knobs-tests PRIVATE knobs_tools knobs_tray delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)

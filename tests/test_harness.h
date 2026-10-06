@@ -26,6 +26,11 @@ struct Registrar {
 
 inline int g_failures = 0;
 
+// Whether this binary was started as the stand-in for OBS that a tray test
+// starts (tray_tests.cpp, OpenObsStartsInItsBinFolder). It has done its part
+// when this returns true, and should exit.
+bool RunAsStandInObs();
+
 }  // namespace knobs::test
 
 #define TEST(name)                                            \

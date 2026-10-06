@@ -41,6 +41,9 @@ struct MicCandidate {
   std::string device_id;
   // Whether OBS monitors it.
   bool monitored = false;
+  // The filters that run, by name, in order: as ImportedMic::filters will
+  // list them once this mic is imported.
+  std::vector<std::string> filters;
 
   friend bool operator==(const MicCandidate&, const MicCandidate&) = default;
 };
@@ -58,6 +61,9 @@ struct ImportNote {
   // information only.
   bool warning = false;
   std::string text;
+  // A note that changes what to expect all the same, such as push-to-talk
+  // not silencing the cable. The first run shows these with the warnings.
+  bool changes_expectations = false;
 
   friend bool operator==(const ImportNote&, const ImportNote&) = default;
 };
@@ -68,8 +74,10 @@ struct ImportedMic {
   // filters pre-flight removed. Serialized by libobs, the way OBS saves it.
   std::string source_json;
   std::vector<ImportNote> notes;
-  // The filters that are on, by name, in processing order: the chain as OBS
-  // shows it.
+  // The filters that run, by name, in processing order: the chain as OBS
+  // shows it, minus filters that are off and placeholders for types libobs
+  // doesn't have (a placeholder passes audio through, and pre-flight warns
+  // about it).
   std::vector<std::string> filters;
   // source_json without the keys that don't change what reaches the cable:
   // libobs's monitor ignores mute, push-to-talk and push-to-mute, the

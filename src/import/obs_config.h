@@ -31,6 +31,10 @@ Result<ObsConfigRoot> FindObsConfigRoot(const std::filesystem::path& install_roo
 // of a portable install, which ignores global.ini's [Locations].
 ObsConfigRoot ObsConfigRootAt(const std::filesystem::path& folder);
 
+// The settings folder someone means by picking `folder`: the folder holding
+// obs-studio\, or, when they picked obs-studio\ itself, the one above it.
+std::filesystem::path SettingsFolderFor(const std::filesystem::path& folder);
+
 // A profile's [Audio] settings in basic.ini, with the defaults OBS uses for
 // missing keys (OBSBasic.cpp, InitBasicConfigDefaults).
 struct ProfileAudio {

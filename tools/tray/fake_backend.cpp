@@ -6,6 +6,7 @@
 
 #include "app_info.h"
 #include "runtime/obs_version.h"
+#include "tray/menu.h"
 
 namespace knobs::tools {
 namespace {
@@ -13,9 +14,25 @@ namespace {
 constexpr char kInterfaceId[] = "{0.0.1.00000000}.{6a0e2a51-audient-id4}";
 constexpr char kSpeakersId[] = "{0.0.0.00000000}.{speakers}";
 constexpr char kHeadphonesId[] = "{0.0.0.00000000}.{audient-id4-out}";
+constexpr char kHeadphonesName[] = "Headphones (Audient iD4)";
 constexpr char kCableInputId[] = "{0.0.0.00000000}.{vb-cable-input}";
+constexpr char kCableInputName[] = "CABLE Input (VB-Audio Virtual Cable)";
 constexpr char kCable16Id[] = "{0.0.0.00000000}.{vb-cable-16ch}";
 constexpr char kCable16Name[] = "CABLE In 16ch (VB-Audio Virtual Cable)";
+
+// tests/fixtures/obs-config's devices.
+constexpr char kFixtureMicId[] = "{0.0.1.00000000}.{00000000-0000-0000-0000-0000000000a1}";
+constexpr char kFixturePodcastMicId[] = "{0.0.1.00000000}.{00000000-0000-0000-0000-0000000000a2}";
+constexpr char kFixtureCableId[] = "{0.0.0.00000000}.{00000000-0000-0000-0000-00000000cab1}";
+
+const std::vector<std::string> kStepsFilters = {"Noise Suppression", "Noise Gate", "Compressor", "Limiter"};
+
+void SetFilters(import::ImportedMic& mic, std::vector<std::string> filters) {
+  mic.filters = std::move(filters);
+  mic.mic.filters = mic.filters;
+  mic.chain_key = mic.mic.name;
+  for (const std::string& filter : mic.filters) mic.chain_key += "|" + filter;
+}
 
 import::ImportedMic MakeMic(std::string name, std::string location, std::vector<std::string> filters) {
   import::ImportedMic mic;
@@ -25,15 +42,25 @@ import::ImportedMic MakeMic(std::string name, std::string location, std::vector<
   mic.mic.key = mic.mic.location;
   mic.mic.device_id = kInterfaceId;
   mic.mic.monitored = true;
-  mic.filters = std::move(filters);
-  mic.chain_key = mic.mic.name;
-  for (const std::string& filter : mic.filters) mic.chain_key += "|" + filter;
   mic.source_json = "{}";
+  SetFilters(mic, std::move(filters));
   return mic;
 }
 
 void RemoveOutput(FakeWorld& world, std::string_view id) {
   std::erase_if(world.devices.outputs, [id](const audio::AudioDevice& device) { return device.id == id; });
+}
+
+// The OBS profile monitors to its default device, usually speakers.
+void MonitorToDefault(FakeWorld& world) {
+  world.config.audio.monitoring_device_id = "default";
+  world.config.audio.monitoring_device_name.clear();
+}
+
+// No virtual cable is installed. VB-Cable's input is the spare.
+void NoCable(FakeWorld& world) {
+  world.devices.outputs = {{"Speakers (Realtek(R) Audio)", kSpeakersId}, {kHeadphonesName, kHeadphonesId}};
+  world.spare_cables = {{kCableInputName, kCableInputId}};
 }
 
 }  // namespace
@@ -50,8 +77,19 @@ FakeWorld DefaultWorld() {
   world.devices.mics = {{"Microphone (Audient iD4)", kInterfaceId}};
   world.devices.default_mic = kInterfaceId;
   world.devices.outputs = {{"Speakers (Realtek(R) Audio)", kSpeakersId},
-                           {"Headphones (Audient iD4)", kHeadphonesId},
-                           {"CABLE Input (VB-Audio Virtual Cable)", kCableInputId},
+                           {kHeadphonesName, kHeadphonesId},
+                           {kCableInputName, kCableInputId},
+                           {kCable16Name, kCable16Id}};
+  return world;
+}
+
+FakeWorld FixtureWorld() {
+  FakeWorld world = DefaultWorld();
+  world.devices.mics = {{"Microphone (Audient iD4)", kFixtureMicId}, {"Microphone (Shure MV7)", kFixturePodcastMicId}};
+  world.devices.default_mic = kFixtureMicId;
+  world.devices.outputs = {{"Speakers (Realtek(R) Audio)", kSpeakersId},
+                           {kHeadphonesName, kHeadphonesId},
+                           {kCableInputName, kFixtureCableId},
                            {kCable16Name, kCable16Id}};
   return world;
 }
@@ -70,8 +108,8 @@ const std::vector<FakeScenario>& FakeScenarios() {
        [](FakeWorld& world, FakeScript&) { RemoveOutput(world, kCable16Id); }},
       {"setup-obs", "OBS's settings can't be read",
        [](FakeWorld& world, FakeScript&) {
-         world.config_error = "OBS's settings weren't found in C:\\Users\\you\\AppData\\Roaming\\obs-studio. Run OBS "
-                              "once, or choose its settings folder.";
+         world.config_error =
+             "OBS has no settings in C:\\Users\\you\\AppData\\Roaming\\obs-studio yet. Open OBS once and close it.";
        }},
       {"setup-no-mic", "the scene collection has no mic",
        [](FakeWorld& world, FakeScript&) { world.collection.clear(); }},
@@ -81,9 +119,39 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.collection.push_back(MakeMic("Podcast Mic", "sources[4]", {"Noise Gate", "Compressor"}));
        }},
       {"setup-cable", "the OBS profile monitors to the default device",
+       [](FakeWorld& world, FakeScript&) { MonitorToDefault(world); }},
+      {"no-filters", "Mic/Aux has no filters",
+       [](FakeWorld& world, FakeScript&) { SetFilters(world.collection.front(), {}); }},
+      {"no-cable", "no virtual cable is installed, and OBS monitors to the default device",
        [](FakeWorld& world, FakeScript&) {
-         world.config.audio.monitoring_device_id = "default";
-         world.config.audio.monitoring_device_name.clear();
+         MonitorToDefault(world);
+         NoCable(world);
+       }},
+      {"not-a-cable", "the OBS profile monitors to headphones",
+       [](FakeWorld& world, FakeScript&) {
+         world.config.audio.monitoring_device_id = kHeadphonesId;
+         world.config.audio.monitoring_device_name = kHeadphonesName;
+       }},
+      {"warnings", "Mic/Aux has a VST filter and push-to-talk",
+       [](FakeWorld& world, FakeScript&) {
+         world.collection.front().notes = {
+             {true, std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
+                                "plugins yet, so it leaves the filter out.",
+                                kDisplayName)},
+             {false, "Filter \"Expander\" is off in OBS, and stays off."},
+             {false,
+              std::format("The mic is on push-to-talk in OBS. libobs's monitor ignores mute, push-to-talk and "
+                          "push-to-mute (OBS 32.2 and later), so the cable gets the mic either way, from OBS and "
+                          "from {}.",
+                          kDisplayName),
+              true}};
+       }},
+      {"new-user", "OBS opened once: Mic/Aux on the default device with no filters, no cable",
+       [](FakeWorld& world, FakeScript&) {
+         world.collection.front().mic.device_id = "default";
+         SetFilters(world.collection.front(), {});
+         MonitorToDefault(world);
+         NoCable(world);
        }},
       {"obs-missing", "OBS isn't installed",
        [](FakeWorld& world, FakeScript&) {
@@ -111,15 +179,37 @@ const std::vector<FakeScenario>& FakeScenarios() {
   return scenarios;
 }
 
+void ToggleCables(FakeWorld& world) {
+  std::vector<audio::AudioDevice> cables;
+  std::erase_if(world.devices.outputs, [&cables](const audio::AudioDevice& device) {
+    if (!tray::IsVirtualCable(device.name)) return false;
+    cables.push_back(device);
+    return true;
+  });
+  if (cables.empty()) {
+    world.devices.outputs.insert(world.devices.outputs.end(), world.spare_cables.begin(), world.spare_cables.end());
+  } else {
+    world.spare_cables = std::move(cables);
+  }
+}
+
+void AddFilters(FakeWorld& world) {
+  for (import::ImportedMic& mic : world.collection) {
+    if (mic.filters.empty()) SetFilters(mic, kStepsFilters);
+  }
+}
+
 core::ObsCheck FakeBackend::CheckObs(const core::Settings&) {
   ++checks_;
-  if (checks_ > 1 && world_.obs_later) return *world_.obs_later;
-  return world_.obs;
+  const FakeWorld world = world_->Get();
+  if (checks_ > 1 && world.obs_later) return *world.obs_later;
+  return world.obs;
 }
 
 Result<import::ActiveObsConfig> FakeBackend::ReadObsConfig(const core::Settings&, const runtime::ObsInstall&) {
-  if (world_.config_error) return Error{*world_.config_error};
-  return world_.config;
+  const FakeWorld world = world_->Get();
+  if (world.config_error) return Error{*world.config_error};
+  return world.config;
 }
 
 Status FakeBackend::StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) {
@@ -129,20 +219,27 @@ Status FakeBackend::StartLibobs(const runtime::ObsInstall& install, const import
 }
 
 Result<core::MicImport> FakeBackend::ImportMic(const import::ActiveObsConfig&, std::string_view pick) {
+  const FakeWorld world = world_->Get();
   core::MicImport result;
-  for (const import::ImportedMic& mic : world_.collection) result.mics.push_back(mic.mic);
+  for (const import::ImportedMic& mic : world.collection) result.mics.push_back(mic.mic);
   auto picked = import::PickMic(result.mics, pick);
   if (!picked) {
     result.pick_error = picked.error();
     return result;
   }
   result.picked = *picked;
-  result.mic = world_.collection[*picked];
+  result.mic = world.collection[*picked];
   return result;
 }
 
 Status FakeBackend::StartChain(const core::ChainPlan& plan) {
-  if (world_.chain_error) return Error{*world_.chain_error};
+  if (const FakeWorld world = world_->Get(); world.chain_error) return Error{*world.chain_error};
+  Log(std::format("The chain would run into \"{}\".", plan.cable.name));
+  return Ok{};
+}
+
+Status FixtureBackend::StartChain(const core::ChainPlan& plan) {
+  if (const FakeWorld world = world_->Get(); world.chain_error) return Error{*world.chain_error};
   Log(std::format("The chain would run into \"{}\".", plan.cable.name));
   return Ok{};
 }

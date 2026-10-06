@@ -9,7 +9,7 @@
       <ellipse cx="120" cy="135" rx="96" ry="40" fill="url(#k5b-skirt)"></ellipse>
       <ellipse cx="120" cy="135" rx="95" ry="39" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width="2"></ellipse>
       <g transform="translate(120 135) scale(1 .4167)">
-        <g fill="#efebe3">
+        <g fill="#e8eaee">
           <rect x="-3" y="-94" width="6" height="18" rx="3" transform="rotate(-150)"></rect>
           <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(-120)"></rect>
           <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(-90)"></rect>

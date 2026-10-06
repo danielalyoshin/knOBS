@@ -111,6 +111,7 @@ class Controller {
 
   // From the last Refresh.
   std::optional<Problem> problem_;
+  runtime::ObsInstall obs_install_;
   std::optional<Libobs> libobs_;
   std::optional<MicImport> import_;
   std::optional<ChainPlan> plan_;

@@ -11,34 +11,13 @@
 
 #include "audio/audio_devices.h"
 #include "audio/device_watch.h"
+#include "core/state.h"
 #include "import/mic_import.h"
 #include "import/obs_config.h"
 #include "runtime/obs_install.h"
 #include "util/result.h"
 
 namespace knobs::core {
-
-// knobs's own choices. They override what it imports, and survive
-// re-imports.
-struct Settings {
-  // The OBS install. Default: found as runtime::FindObsInstall finds it.
-  std::optional<std::filesystem::path> obs_dir;
-  // OBS's settings folder, the one holding obs-studio\. Default: where OBS
-  // keeps it (import::FindObsConfigRoot).
-  std::optional<std::filesystem::path> obs_config;
-  // Which mic, as import::PickMic takes it. Empty picks the only one.
-  std::string mic;
-  // The playback device to send the mic to, by endpoint ID. Empty: the OBS
-  // profile's monitoring device.
-  std::string cable;
-  // Its name, for saying which device is missing while it isn't connected.
-  std::string cable_name;
-  // Pause while OBS runs (State::kPausedForObs). Off, the chain keeps running
-  // while OBS is open; OBS exiting still re-imports.
-  bool pause_for_obs = true;
-
-  friend bool operator==(const Settings&, const Settings&) = default;
-};
 
 enum class ObsFound { kYes, kMissing, kUnsupported };
 

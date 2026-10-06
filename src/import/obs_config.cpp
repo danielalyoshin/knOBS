@@ -97,10 +97,16 @@ ObsConfigRoot ObsConfigRootAt(const fs::path& folder) {
   return {path, portable};
 }
 
+fs::path SettingsFolderFor(const fs::path& folder) {
+  const fs::path path = folder.has_filename() ? folder : folder.parent_path();
+  if (AsciiLower(ToUtf8(path.filename())) == "obs-studio" && !Exists(path / L"obs-studio")) return path.parent_path();
+  return path;
+}
+
 Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
   const fs::path global_file = root.path / L"obs-studio" / L"global.ini";
   if (!Exists(global_file)) {
-    return Error{std::format("OBS has no settings in {}. Start OBS once, then import again.",
+    return Error{std::format("OBS has no settings in {} yet. Open OBS once and close it.",
                              ToUtf8(root.path / L"obs-studio"))};
   }
   auto global = ObsIni::Read(global_file);
@@ -122,8 +128,7 @@ Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
   const auto profile = settings.Get("Basic", "Profile");
   const auto collection = settings.Get("Basic", "SceneCollection");
   if (!profile || profile->empty() || !collection || collection->empty()) {
-    return Error{std::format("{} doesn't name an active profile and scene collection. Start OBS once, then "
-                             "import again.",
+    return Error{std::format("{} doesn't name an active profile and scene collection. Open OBS once and close it.",
                              ToUtf8(config.settings_file))};
   }
   config.profile = *profile;

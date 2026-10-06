@@ -60,6 +60,10 @@ void Core::Apply(Settings settings) {
   });
 }
 
+void Core::DevicesChanged() {
+  Post([](Controller& controller, Clock::time_point now) { controller.DevicesChanged(now); });
+}
+
 void Core::Post(Task task) {
   {
     std::lock_guard lock(mutex_);
@@ -105,8 +109,7 @@ void Core::Run(std::unique_ptr<Backend> backend, std::promise<Status>* started) 
     std::unique_ptr<audio::DeviceWatch> devices;
     std::string device_watch_error;
     if (options_.watch_devices) {
-      auto watch = audio::DeviceWatch::Start(
-          [this] { Post([](Controller& controller, Clock::time_point now) { controller.DevicesChanged(now); }); });
+      auto watch = audio::DeviceWatch::Start([this] { DevicesChanged(); });
       if (watch) {
         devices = std::move(*watch);
       } else {

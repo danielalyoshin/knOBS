@@ -1,5 +1,5 @@
 <?xml version="1.0"?><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
-<rect width="512" height="512" rx="114" fill="#ebe8e1"></rect><svg x="56.00" y="104.00" width="400.00" height="304.00" viewBox="20 40 200 152"><defs>
+<rect width="512" height="512" rx="114" fill="#e8eaee"></rect><svg x="56.00" y="104.00" width="400.00" height="304.00" viewBox="20 40 200 152"><defs>
         <linearGradient id="k5b-side" x1="0" x2="1"><stop offset="0" stop-color="#101113"></stop><stop offset=".24" stop-color="#4a4c52"></stop><stop offset=".55" stop-color="#1e1f23"></stop><stop offset="1" stop-color="#08080a"></stop></linearGradient>
         <linearGradient id="k5b-skirt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1e1f22"></stop><stop offset="1" stop-color="#3a3c41"></stop></linearGradient>
         <radialGradient id="k5b-top" cx=".42" cy=".3" r=".8"><stop offset="0" stop-color="#505258"></stop><stop offset="1" stop-color="#26272b"></stop></radialGradient>
@@ -9,7 +9,7 @@
       <ellipse cx="120" cy="135" rx="96" ry="40" fill="url(#k5b-skirt)"></ellipse>
       <ellipse cx="120" cy="135" rx="95" ry="39" fill="none" stroke="#fff" stroke-opacity=".2" stroke-width="2"></ellipse>
       <g transform="translate(120 135) scale(1 .4167)">
-        <g fill="#efebe3">
+        <g fill="#e8eaee">
           <rect x="-3" y="-94" width="6" height="18" rx="3" transform="rotate(-150)"></rect>
           <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(-120)"></rect>
           <rect x="-2.2" y="-91" width="4.4" height="13" rx="2.2" transform="rotate(-90)"></rect>

@@ -466,6 +466,18 @@ TEST(ConfigRootIsPortableWithAMarker) {
   CHECK(!import::ObsConfigRootAt(dir.path).portable);
 }
 
+TEST(SettingsFolderIsTheOneAboveObsStudio) {
+  TempDir dir(L"picked");
+  WriteFile(dir.path / L"config" / L"obs-studio" / L"global.ini", "");
+  // Picked as meant, or one level too deep.
+  CHECK(import::SettingsFolderFor(dir.path / L"config") == dir.path / L"config");
+  CHECK(import::SettingsFolderFor(dir.path / L"config" / L"obs-studio") == dir.path / L"config");
+  CHECK(import::SettingsFolderFor(dir.path / L"config" / L"OBS-Studio" / L"") == dir.path / L"config");
+  // A folder named obs-studio that holds one is the settings folder itself.
+  WriteFile(dir.path / L"obs-studio" / L"obs-studio" / L"global.ini", "");
+  CHECK(import::SettingsFolderFor(dir.path / L"obs-studio") == dir.path / L"obs-studio");
+}
+
 TEST(ConfigReadsSampleRateLikeObs) {
   // libobs reads numbers with strtoull: whitespace first and junk after are
   // fine, and "0x" means hex.
@@ -550,7 +562,7 @@ TEST(ConfigUsesExistingLocationsOnly) {
 TEST(ConfigReportsWhatsMissing) {
   TempDir dir(L"missing");
   auto none = import::FindActiveObsConfig({dir.path, false});
-  CHECK(!none.ok() && none.error().find("Start OBS once") != std::string::npos);
+  CHECK(!none.ok() && none.error().find("Open OBS once and close it.") != std::string::npos);
   WriteObsConfig(dir.path, {{"global.ini", ""}, {"user.ini", "[Basic]\nProfile=Gone\nSceneCollection=C\n"}});
   auto gone = import::FindActiveObsConfig({dir.path, false});
   CHECK(!gone.ok() && gone.error().find("\"Gone\"") != std::string::npos);
@@ -893,6 +905,7 @@ TEST(EnvelopeIgnoresFramesOffTheGrid) {
 int main() {
   using knobs::test::g_failures;
   using knobs::test::Tests;
+  if (knobs::test::RunAsStandInObs()) return 0;
   for (const knobs::test::TestCase& test : Tests()) {
     const int before = g_failures;
     test.run();

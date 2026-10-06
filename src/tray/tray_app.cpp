@@ -7,13 +7,13 @@
 #include <windowsx.h>
 
 #include <format>
-#include <map>
 #include <system_error>
 #include <utility>
 #include <vector>
 
 #include "app_info.h"
 #include "runtime/obs_install.h"
+#include "tray/open_obs.h"
 #include "tray/resource.h"
 #include "tray/settings_file.h"
 #include "util/win_strings.h"
@@ -26,10 +26,10 @@ constexpr UINT kIconId = 1;
 constexpr UINT kTrayMessage = WM_APP + 1;      // From the icon (NOTIFYICON_VERSION_4).
 constexpr UINT kSnapshotMessage = WM_APP + 2;  // OnSnapshot left one in pending_.
 constexpr UINT kActivateMessage = WM_APP + 3;  // Another copy was started (ActivateTray).
+constexpr UINT kFirstRunMessage = WM_APP + 4;  // Open the unfinished first run.
 
-// Creates the native menu for `items`, noting each submenu's handle by its
-// item's ID.
-HMENU CreateNativeMenu(const std::vector<MenuItem>& items, std::map<unsigned, HMENU>& submenus) {
+// Creates the native menu for `items`.
+HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
   const HMENU menu = CreatePopupMenu();
   UINT position = 0;
   for (const MenuItem& item : items) {
@@ -47,8 +47,7 @@ HMENU CreateNativeMenu(const std::vector<MenuItem>& items, std::map<unsigned, HM
       info.dwTypeData = text.data();
       if (item.kind == MenuItem::Kind::kSubmenu) {
         info.fMask |= MIIM_SUBMENU;
-        info.hSubMenu = CreateNativeMenu(item.items, submenus);
-        submenus[item.id] = info.hSubMenu;
+        info.hSubMenu = CreateNativeMenu(item.items);
       }
     }
     InsertMenuItemW(menu, position++, TRUE, &info);
@@ -92,7 +91,8 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   std::string settings_error;
   if (!opts.settings_file.empty()) {
     if (auto loaded = LoadSettings(opts.settings_file)) {
-      app->settings_ = std::move(*loaded);
+      app->settings_ = std::move(loaded->core);
+      app->first_run_ = loaded->first_run;
     } else {
       settings_error = loaded.error();
     }
@@ -124,6 +124,8 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
     app->ShowError(std::format("Couldn't read the settings, so {} uses its defaults until they're changed.\n\n{}",
                                kDisplayName, settings_error));
   }
+  // Once Run pumps messages: the dialog's loop needs Run's to end with it.
+  if (opts.open_first_run && !app->first_run_.done) PostMessageW(app->window_, kFirstRunMessage, 0, 0);
   return app;
 }
 
@@ -221,8 +223,9 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
         snapshot.swap(pending_);
       }
       if (snapshot) {
-        snapshot_ = std::move(*snapshot);
+        const core::Snapshot before = std::exchange(snapshot_, std::move(*snapshot));
         UpdateTip();
+        if (first_run_dialog_) first_run_dialog_->Changed(before);
         if (options_.on_snapshot) options_.on_snapshot(snapshot_);
       }
       return 0;
@@ -230,9 +233,15 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     case kActivateMessage:
       if (const HWND dialog = OpenDialog()) {
         SetForegroundWindow(dialog);
+      } else if (!first_run_.done) {
+        // Started again before setup was finished: that's what's wanted.
+        ShowFirstRun(false);
       } else {
         ShowMenu(IconPoint());
       }
+      return 0;
+    case kFirstRunMessage:
+      if (!first_run_.done) ShowFirstRun(false);
       return 0;
     case WM_SETTINGCHANGE:
       if (wparam == SPI_SETHIGHCONTRAST ||
@@ -310,19 +319,12 @@ void TrayApp::ShowMenu(POINT point) {
   in_menu_ = true;
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
   const Menu menu = BuildMenu(snapshot_, settings_, starts);
-  std::map<unsigned, HMENU> submenus;
-  const HMENU native = CreateNativeMenu(menu.items, submenus);
+  const HMENU native = CreateNativeMenu(menu.items);
   // Without this, the menu wouldn't close when the user clicks elsewhere.
   SetForegroundWindow(window_);
   UINT flags = TPM_RIGHTBUTTON | TPM_RETURNCMD | TPM_NONOTIFY;
   flags |= GetSystemMetrics(SM_MENUDROPALIGNMENT) ? TPM_RIGHTALIGN : TPM_LEFTALIGN;
-  UINT id = TrackPopupMenuEx(native, flags, point.x, point.y, window_, nullptr);
-  // "Choose a mic…" and "Choose a cable…" open those choices where the menu
-  // was.
-  if (id == kIdChooseMic || id == kIdChooseCable) {
-    const auto choices = submenus.find(id == kIdChooseMic ? kIdMicMenu : kIdCableMenu);
-    id = choices == submenus.end() ? 0 : TrackPopupMenuEx(choices->second, flags, point.x, point.y, window_, nullptr);
-  }
+  const UINT id = TrackPopupMenuEx(native, flags, point.x, point.y, window_, nullptr);
   PostMessageW(window_, WM_NULL, 0, 0);
   DestroyMenu(native);
   in_menu_ = false;
@@ -348,7 +350,7 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
       break;
     case kIdReimport:
     case kIdTryAgain:
-      if (core_) core_->Reimport();
+      Reimport();
       break;
     case kIdPauseForObs: {
       core::Settings settings = settings_;
@@ -360,8 +362,13 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
       ToggleStartWithWindows();
       break;
     case kIdSetup:
+      ShowFirstRun(true);
+      break;
     case kIdFinishSetup:
-      ShowSetup();
+    case kIdChooseMic:
+    case kIdChooseCable:
+      // Opens at the page for it: the state calls for it.
+      ShowFirstRun(false);
       break;
     case kIdFindObs:
       FindObs();
@@ -383,11 +390,55 @@ void TrayApp::Execute(unsigned id, const Menu& menu) {
   }
 }
 
+void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
+  if (quitting_) return;
+  if (first_run_dialog_) {
+    if (const HWND window = first_run_dialog_->window()) SetForegroundWindow(window);
+    return;
+  }
+  FirstRunProgress progress = first_run_;
+  if (progress.done) {
+    // Every page again, or only what the state calls for, then the last.
+    progress = from_start ? FirstRunProgress{.done = true}
+                          : FirstRunProgress{.done = true, .door = Door::kObsUser, .reached = FirstRunPage::kDone};
+  }
+  FirstRunDialog dialog(*this, options_.instance, FirstRun(progress, page));
+  first_run_dialog_ = &dialog;
+  dialog.Show();
+  first_run_dialog_ = nullptr;
+}
+
 void TrayApp::ApplySettings(const core::Settings& settings) {
   settings_ = settings;
   if (core_) core_->Apply(settings_);
+  Save();
+}
+
+void TrayApp::Reimport() {
+  if (core_) core_->Reimport();
+}
+
+Status TrayApp::StartObs(const std::filesystem::path& install_root) {
+  return options_.open_obs ? options_.open_obs(install_root) : OpenObs(install_root);
+}
+
+void TrayApp::FinishFirstRun(bool start_with_windows) {
+  const bool starts = options_.starts_with_windows && options_.starts_with_windows();
+  if (options_.set_start_with_windows && start_with_windows != starts) {
+    if (const Status set = options_.set_start_with_windows(start_with_windows); !set) ShowError(set.error());
+  }
+  first_run_.done = true;
+  Save();
+}
+
+void TrayApp::SaveFirstRun(const FirstRunProgress& progress) {
+  first_run_ = progress;
+  Save();
+}
+
+void TrayApp::Save() {
   if (options_.settings_file.empty()) return;
-  if (const Status saved = SaveSettings(options_.settings_file, settings_); !saved) {
+  if (const Status saved = SaveSettings(options_.settings_file, {settings_, first_run_}); !saved) {
     ShowError(std::format("Couldn't save the change, so it lasts only until {} quits.\n\n{}", kDisplayName,
                           saved.error()));
   }
@@ -432,24 +483,6 @@ void TrayApp::ShowAbout() {
                          L"by the OBS Project.",
                          kDisplayNameW),
              L"Free software under the GNU General Public License, version 2 or later.");
-  if (icon) DestroyIcon(icon);
-}
-
-void TrayApp::ShowSetup() {
-  // Stands in for the first run (plan.md, Tray and first run) until it's
-  // built: what knobs found, and what it needs.
-  std::string content = snapshot_.detail;
-  if (snapshot_.chain) {
-    core::ChainSummary chain = *snapshot_.chain;
-    chain.cable = ShortDeviceName(chain.cable);
-    if (!content.empty()) content += "\n\n";
-    content += "The chain: " + core::FormatChain(chain, false);
-  }
-  for (const import::ImportNote& note : snapshot_.notes) {
-    content += std::format("\n\n{}{}", note.warning ? "Warning: " : "", note.text);
-  }
-  const HICON icon = LoadAppIcon(options_.instance, LIM_LARGE);
-  ShowDialog(options_.instance, nullptr, icon, FromUtf8(StatusLine(snapshot_)), FromUtf8(content));
   if (icon) DestroyIcon(icon);
 }
 

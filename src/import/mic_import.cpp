@@ -26,6 +26,7 @@ constexpr std::array<const char*, 6> kGlobalDeviceKeys = {"DesktopAudioDevice1",
 constexpr std::string_view kVstFilterId = "vst_filter";
 constexpr std::string_view kNvidiaFilterId = "nvidia_audiofx_filter";
 constexpr std::string_view kCompressorId = "compressor_filter";
+constexpr std::string_view kGainId = "gain_filter";
 // What ImportedMic::chain_key leaves out of a saved source (obs.c,
 // obs_save_source).
 constexpr std::array<const char*, 16> kKeysTheCableIgnores = {
@@ -68,6 +69,60 @@ bool Bool(const runtime::ObsApi& api, obs_data_t* data, const char* name, bool m
   return api.obs_data_has_user_value(data, name) ? api.obs_data_get_bool(data, name) : missing;
 }
 
+// A compressor that ducks under another source: the only filter in
+// obs-filters 32.2.2 with a sidechain.
+struct Ducking {
+  std::string sidechain;   // The source it follows.
+  double output_gain = 0;  // In dB, as saved.
+};
+
+std::optional<Ducking> AsDucking(const runtime::ObsApi& api, obs_data_t* filter) {
+  if (String(api, filter, "id") != kCompressorId) return std::nullopt;
+  DataPtr settings = Own(api, api.obs_data_get_obj(filter, "settings"));
+  const std::string sidechain = settings ? String(api, settings.get(), "sidechain_source") : "";
+  if (sidechain.empty() || sidechain == "none") return std::nullopt;
+  return Ducking{sidechain, api.obs_data_get_double(settings.get(), "output_gain")};
+}
+
+// What OBS's compressor does while nothing plays on its sidechain: OBS's Gain
+// filter at the compressor's output gain, in its place.
+//
+// With a sidechain, the compressor follows the sidechain's level instead of
+// the mic's; without one, the mic's (compressor-filter.c,
+// compressor_filter_audio). knobs loads only the mic, so as saved it would
+// compress the mic by its own level. While the sidechain is below the
+// threshold, silence included, the compressor's gain is exactly 1, and each
+// sample is multiplied by db_to_mul((float)output_gain), which is what the
+// Gain filter does with its "db" (gain-filter.c): the same audio, bit for bit.
+DataPtr GainInsteadOf(const runtime::ObsApi& api, obs_data_t* compressor, double db) {
+  // A copy keeps the filter's name, its enabled flag and the rest the loader
+  // reads; only its type and settings change.
+  const char* json = api.obs_data_get_json(compressor);
+  DataPtr gain = Own(api, json ? api.obs_data_create_from_json(json) : nullptr);
+  if (!gain) return gain;
+  api.obs_data_set_string(gain.get(), "id", kGainId.data());
+  api.obs_data_set_string(gain.get(), "versioned_id", kGainId.data());
+  DataPtr settings = Own(api, api.obs_data_create());
+  api.obs_data_set_double(settings.get(), "db", db);
+  api.obs_data_set_obj(gain.get(), "settings", settings.get());
+  return gain;
+}
+
+// Whether a filter is part of the chain anyone hears: it's on, libobs has its
+// type, and pre-flight keeps it as something that changes the audio. For a
+// type it doesn't have, such as NVIDIA's noise removal from nv-filters or a
+// VST plugin from obs-vst, libobs loads a placeholder that passes audio
+// through untouched. A compressor with a sidechain runs only as its output
+// gain (GainInsteadOf).
+bool Runs(const runtime::ObsApi& api, obs_data_t* filter) {
+  if (!Bool(api, filter, "enabled", true) || String(api, filter, "id") == kVstFilterId ||
+      api.obs_get_source_output_flags(VersionedId(api, filter).c_str()) == 0) {
+    return false;
+  }
+  const auto ducking = AsDucking(api, filter);
+  return !ducking || ducking->output_gain != 0;
+}
+
 // `file` parsed by libobs as its JSON reader takes it: os_quick_read_utf8_file
 // skips a BOM. Null if it doesn't parse.
 obs_data_t* ParseJsonFile(const runtime::ObsApi& api, const fs::path& file) {
@@ -97,6 +152,12 @@ std::optional<MicCandidate> AsMic(const runtime::ObsApi& api, obs_data_t* source
   // OBS 33 saves monitoring on or off as its own key (plan.md, OBS 33.0 notes).
   mic.monitored = api.obs_data_get_int(source, "monitoring_type") != OBS_MONITORING_TYPE_NONE ||
                   api.obs_data_get_bool(source, "monitoring_enabled");
+  ArrayPtr filters = Own(api, api.obs_data_get_array(source, "filters"));
+  const size_t count = filters ? api.obs_data_array_count(filters.get()) : 0;
+  for (size_t i = 0; i < count; ++i) {
+    DataPtr filter = Own(api, api.obs_data_array_item(filters.get(), i));
+    if (Runs(api, filter.get())) mic.filters.push_back(String(api, filter.get(), "name"));
+  }
   return mic;
 }
 
@@ -105,8 +166,9 @@ std::string FileName(std::string_view path) {
   return std::string(slash == std::string_view::npos ? path : path.substr(slash + 1));
 }
 
-// One filter's pre-flight. Returns whether to keep it.
-bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<ImportNote>& notes) {
+// One filter's pre-flight. Returns whether to keep it, and sets `instead` to
+// a filter to load in its place, if any.
+bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<ImportNote>& notes, DataPtr& instead) {
   const std::string name = String(api, filter, "name");
   const std::string id = String(api, filter, "id");
   const std::string type = VersionedId(api, filter);
@@ -143,13 +205,28 @@ bool CheckFilter(const runtime::ObsApi& api, obs_data_t* filter, std::vector<Imp
     notes.push_back({false, std::format("Filter \"{}\" is off in OBS, and stays off.", name)});
     return true;
   }
-  if (id == kCompressorId && settings) {
-    const std::string sidechain = String(api, settings.get(), "sidechain_source");
-    if (!sidechain.empty() && sidechain != "none") {
-      notes.push_back({true, std::format("Compressor \"{}\" ducks under \"{}\" in OBS. {} loads only the mic, "
-                                         "so it compresses without that sidechain.",
-                                         name, sidechain, kDisplayName)});
+  if (const auto ducking = AsDucking(api, filter)) {
+    // As OBS while nothing plays on the sidechain (GainInsteadOf). At 0 dB
+    // that's no change at all.
+    const std::string what = std::format("Compressor \"{}\" turns the mic down under \"{}\" in OBS.", name,
+                                         ducking->sidechain);
+    const std::string then = std::format("and the mic sounds as it does in OBS while nothing plays on \"{}\".",
+                                         ducking->sidechain);
+    if (ducking->output_gain != 0) instead = GainInsteadOf(api, filter, ducking->output_gain);
+    if (instead) {
+      notes.push_back({true, std::format("{} {} loads only the mic, so it keeps only this compressor's output gain "
+                                         "({:+.1f} dB), {}",
+                                         what, kDisplayName, ducking->output_gain, then)});
+      return true;
     }
+    // At 0 dB, or if libobs couldn't copy the filter.
+    notes.push_back({true, ducking->output_gain == 0
+                               ? std::format("{} {} loads only the mic, so it leaves this compressor out, {}", what,
+                                             kDisplayName, then)
+                               : std::format("{} {} loads only the mic, so it leaves this compressor out, and its "
+                                             "output gain ({:+.1f} dB) with it.",
+                                             what, kDisplayName, ducking->output_gain)});
+    return false;
   }
   return true;
 }
@@ -169,10 +246,11 @@ void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicC
       states += std::format("{}{}", i == 0 ? "" : i + 1 == silencers.size() ? " and " : ", ", silencers[i]);
     }
     // obs_source_t's enabled flag counts as muted (obs-source.c).
-    notes.push_back({false, std::format("The mic is {} in OBS. libobs's monitor ignores mute, push-to-talk and "
-                                        "push-to-mute (OBS 32.2 and later), so the cable gets the mic either way, "
-                                        "from OBS and from {}.",
-                                        states, kDisplayName)});
+    notes.push_back({.text = std::format("The mic is {} in OBS. libobs's monitor ignores mute, push-to-talk and "
+                                         "push-to-mute (OBS 32.2 and later), so the cable gets the mic either way, "
+                                         "from OBS and from {}.",
+                                         states, kDisplayName),
+                     .changes_expectations = true});
   }
   if (const int64_t sync = api.obs_data_get_int(source, "sync"); sync != 0) {
     notes.push_back({false, std::format("The mic has a sync offset of {} ms. libobs's monitor ignores it for "
@@ -284,13 +362,17 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic) const {
   if (filters) {
     ArrayPtr kept = Own(api_, api_.obs_data_array_create());
     const size_t count = api_.obs_data_array_count(filters.get());
+    bool changed = false;
     for (size_t i = 0; i < count; ++i) {
       DataPtr filter = Own(api_, api_.obs_data_array_item(filters.get(), i));
-      if (!CheckFilter(api_, filter.get(), imported.notes)) continue;
-      api_.obs_data_array_push_back(kept.get(), filter.get());
-      if (Bool(api_, filter.get(), "enabled", true)) imported.filters.push_back(String(api_, filter.get(), "name"));
+      DataPtr instead;
+      const bool keep = CheckFilter(api_, filter.get(), imported.notes, instead);
+      changed |= !keep || instead;
+      if (!keep) continue;
+      api_.obs_data_array_push_back(kept.get(), instead ? instead.get() : filter.get());
+      if (Runs(api_, filter.get())) imported.filters.push_back(String(api_, filter.get(), "name"));
     }
-    if (api_.obs_data_array_count(kept.get()) != count) api_.obs_data_set_array(source.get(), "filters", kept.get());
+    if (changed) api_.obs_data_set_array(source.get(), "filters", kept.get());
   }
   CheckSourceState(api_, source.get(), mic, imported.notes);
   const char* json = api_.obs_data_get_json(source.get());

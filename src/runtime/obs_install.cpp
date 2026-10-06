@@ -3,8 +3,6 @@
 
 #include <windows.h>
 #include <shlobj.h>
-#include <shobjidl.h>
-#include <wrl/client.h>
 
 #include <algorithm>
 #include <format>
@@ -12,6 +10,7 @@
 
 #include "app_info.h"
 #include "runtime/obs_layout.h"
+#include "util/pick_folder.h"
 #include "util/win_strings.h"
 
 namespace knobs::runtime {
@@ -134,31 +133,7 @@ Result<ObsInstall> FindObsInstall() {
 }
 
 std::optional<fs::path> PickObsInstallFolder(void* owner) {
-  using Microsoft::WRL::ComPtr;
-  const HRESULT com = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
-  std::optional<fs::path> picked;
-  {
-    ComPtr<IFileOpenDialog> dialog;
-    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER,
-                                   IID_PPV_ARGS(&dialog)))) {
-      FILEOPENDIALOGOPTIONS options = 0;
-      dialog->GetOptions(&options);
-      // FOS_NOCHANGEDIR: libobs resolves its data files against the working
-      // directory (see ObsRuntime::Load), so the dialog mustn't move it.
-      dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST |
-                         FOS_NOCHANGEDIR);
-      dialog->SetTitle(L"Choose your OBS Studio folder");
-      ComPtr<IShellItem> item;
-      if (SUCCEEDED(dialog->Show(static_cast<HWND>(owner))) &&
-          SUCCEEDED(dialog->GetResult(&item))) {
-        wchar_t* path = nullptr;
-        if (SUCCEEDED(item->GetDisplayName(SIGDN_FILESYSPATH, &path))) picked = path;
-        CoTaskMemFree(path);
-      }
-    }
-  }
-  if (SUCCEEDED(com)) CoUninitialize();
-  return picked;
+  return PickFolder(owner, L"Choose your OBS Studio folder");
 }
 
 }  // namespace knobs::runtime

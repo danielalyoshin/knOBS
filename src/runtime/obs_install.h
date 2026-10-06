@@ -15,6 +15,8 @@ namespace knobs::runtime {
 struct ObsInstall {
   std::filesystem::path root;  // Holds bin\, data\ and obs-plugins\.
   ObsVersion version;          // From bin\64bit\obs.dll's version resource.
+
+  friend bool operator==(const ObsInstall&, const ObsInstall&) = default;
 };
 
 // Checks that `folder` is an OBS install with everything knobs needs, and

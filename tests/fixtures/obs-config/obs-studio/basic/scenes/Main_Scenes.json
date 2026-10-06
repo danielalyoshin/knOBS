@@ -252,6 +252,7 @@
                     "settings": {
                         "ratio": 4.0,
                         "threshold": -20.0,
+                        "output_gain": 2.5,
                         "sidechain_source": "Music"
                     },
                     "mixers": 255,

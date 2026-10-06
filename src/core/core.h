@@ -54,6 +54,9 @@ class Core {
   void Resume();
   void Reimport();
   void Apply(Settings settings);
+  // The audio devices may have changed, as a device watch reports it. For a
+  // watch other than the core's own (CoreOptions::watch_devices off).
+  void DevicesChanged();
 
  private:
   using Task = std::function<void(Controller& controller, Controller::Clock::time_point now)>;

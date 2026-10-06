@@ -2,9 +2,11 @@
 //
 // knobs.exe: the tray app. One copy runs per Windows session. It shows its
 // state in the tray and runs the always-on core (src/core) on the user's OBS.
+// Until the first run is finished, it opens that too.
 //
 //   --startup   Started by Windows at sign-in (the Run entry). If a copy is
-//               already running, quit without a word.
+//               already running, quit without a word. Doesn't open the first
+//               run.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
 
 #include <windows.h>
@@ -88,6 +90,8 @@ int Run(HINSTANCE instance, bool startup, bool restart) {
   options.instance = instance;
   options.window_class = window_class;
   options.settings_file = dirs->roaming / L"settings.ini";
+  // An unfinished first run comes back, but not at sign-in.
+  options.open_first_run = !startup;
   options.log_folder = dirs->Logs();
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };

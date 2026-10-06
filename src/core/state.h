@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -10,9 +11,32 @@
 
 #include "audio/audio_devices.h"
 #include "import/mic_import.h"
+#include "runtime/obs_install.h"
 
 // What knobs is doing, as the tray shows it (plan.md, Tray and first run).
 namespace knobs::core {
+
+// knobs's own choices. They override what it imports, and survive
+// re-imports.
+struct Settings {
+  // The OBS install. Default: found as runtime::FindObsInstall finds it.
+  std::optional<std::filesystem::path> obs_dir;
+  // OBS's settings folder, the one holding obs-studio\. Default: where OBS
+  // keeps it (import::FindObsConfigRoot).
+  std::optional<std::filesystem::path> obs_config;
+  // Which mic, as import::PickMic takes it. Empty picks the only one.
+  std::string mic;
+  // The playback device to send the mic to, by endpoint ID. Empty: the OBS
+  // profile's monitoring device.
+  std::string cable;
+  // Its name, for saying which device is missing while it isn't connected.
+  std::string cable_name;
+  // Pause while OBS runs (State::kPausedForObs). Off, the chain keeps running
+  // while OBS is open; OBS exiting still re-imports.
+  bool pause_for_obs = true;
+
+  friend bool operator==(const Settings&, const Settings&) = default;
+};
 
 enum class State {
   // Finding OBS, starting libobs and importing. The first state.
@@ -66,7 +90,7 @@ enum class SetupNeed {
 // The chain as the user knows it from OBS.
 struct ChainSummary {
   std::string mic;                   // As OBS names it, e.g. "Mic/Aux".
-  std::vector<std::string> filters;  // The filters that are on, in order.
+  std::vector<std::string> filters;  // The filters that run, in order (import::ImportedMic::filters).
   std::string cable;                 // Empty until a cable is known.
 
   friend bool operator==(const ChainSummary&, const ChainSummary&) = default;
@@ -100,6 +124,16 @@ struct Snapshot {
   audio::AudioDevice obs_cable;
   // The playback devices that are connected, to pick a cable from.
   std::vector<audio::AudioDevice> outputs;
+  // The recording devices that are connected, and the default
+  // communications device's ID, which a mic set to "default" records from
+  // (M1 findings).
+  std::vector<audio::AudioDevice> inputs;
+  std::string default_input;
+  // The OBS install, once found, even if its version isn't supported.
+  runtime::ObsInstall obs;
+  // The settings this snapshot was worked out with. They lag behind new
+  // ones for as long as the core takes to apply them.
+  Settings settings;
 
   friend bool operator==(const Snapshot&, const Snapshot&) = default;
 };

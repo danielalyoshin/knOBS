@@ -46,9 +46,22 @@ bool ReadBool(const import::ObsIni& ini, std::string_view section, std::string_v
   return fallback;
 }
 
+std::string_view DoorName(Door door) {
+  switch (door) {
+    case Door::kObsUser:
+      return "obs";
+    case Door::kNewToObs:
+      return "new";
+    case Door::kNone:
+      break;
+  }
+  return "";
+}
+
 }  // namespace
 
-std::string FormatSettings(const core::Settings& settings) {
+std::string FormatSettings(const SavedSettings& saved) {
+  const core::Settings& settings = saved.core;
   std::string text = "[OBS]\n";
   if (settings.obs_dir) Line(text, "Install", ToUtf8(*settings.obs_dir));
   if (settings.obs_config) Line(text, "Settings", ToUtf8(*settings.obs_config));
@@ -59,12 +72,20 @@ std::string FormatSettings(const core::Settings& settings) {
     Line(text, "Cable", settings.cable);
     if (!settings.cable_name.empty()) Line(text, "CableName", settings.cable_name);
   }
+  const FirstRunProgress& first_run = saved.first_run;
+  text += "\n[Setup]\n";
+  Line(text, "Done", first_run.done ? "true" : "false");
+  if (!first_run.done && first_run.door != Door::kNone) {
+    Line(text, "Door", DoorName(first_run.door));
+    Line(text, "Page", PageName(first_run.reached));
+  }
   return text;
 }
 
-core::Settings ParseSettings(std::string_view text) {
+SavedSettings ParseSettings(std::string_view text) {
   const import::ObsIni ini = import::ObsIni::Parse(text);
-  core::Settings settings;
+  SavedSettings saved;
+  core::Settings& settings = saved.core;
   const auto path = [&ini](std::string_view key) -> std::optional<std::filesystem::path> {
     const auto value = ini.Get("OBS", key);
     if (!value || value->empty()) return std::nullopt;
@@ -76,18 +97,30 @@ core::Settings ParseSettings(std::string_view text) {
   settings.mic = ini.Get("Audio", "Mic").value_or("");
   settings.cable = ini.Get("Audio", "Cable").value_or("");
   if (!settings.cable.empty()) settings.cable_name = ini.Get("Audio", "CableName").value_or("");
-  return settings;
+
+  FirstRunProgress& first_run = saved.first_run;
+  first_run.done = ReadBool(ini, "Setup", "Done", first_run.done);
+  if (!first_run.done) {
+    const std::string door = ini.Get("Setup", "Door").value_or("");
+    for (const Door known : {Door::kObsUser, Door::kNewToObs}) {
+      if (door == DoorName(known)) first_run.door = known;
+    }
+    // Only the first door's pages from the mic on are steps to resume at.
+    const auto page = PageNamed(ini.Get("Setup", "Page").value_or(""));
+    if (page && *page >= FirstRunPage::kMic) first_run.reached = *page;
+  }
+  return saved;
 }
 
-Result<core::Settings> LoadSettings(const std::filesystem::path& file) {
+Result<SavedSettings> LoadSettings(const std::filesystem::path& file) {
   std::error_code ec;
-  if (!std::filesystem::exists(file, ec) && !ec) return core::Settings{};
+  if (!std::filesystem::exists(file, ec) && !ec) return SavedSettings{};
   auto text = ReadText(file);
   if (!text) return Error{text.error()};
   return ParseSettings(*text);
 }
 
-Status SaveSettings(const std::filesystem::path& file, const core::Settings& settings) {
+Status SaveSettings(const std::filesystem::path& file, const SavedSettings& settings) {
   return WriteText(file, FormatSettings(settings));
 }
 

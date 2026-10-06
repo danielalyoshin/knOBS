@@ -2,7 +2,7 @@
 //
 // Unit tests for the tray app's parts that don't need a window: the menu
 // for each state, the settings file, the Run entry (on a scratch registry
-// key) and the single-instance lock.
+// key), the single-instance lock, and starting OBS (with a stand-in).
 
 #include <windows.h>
 
@@ -10,7 +10,9 @@
 #include <chrono>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <future>
+#include <iterator>
 #include <string>
 #include <thread>
 #include <vector>
@@ -20,8 +22,25 @@
 #include "test_harness.h"
 #include "tray/autostart.h"
 #include "tray/menu.h"
+#include "tray/open_obs.h"
 #include "tray/settings_file.h"
 #include "tray/single_instance.h"
+#include "util/win_strings.h"
+
+namespace knobs::test {
+
+// Started as obs64.exe: notes its working directory next to itself.
+bool RunAsStandInObs() {
+  wchar_t path[MAX_PATH * 2] = {};
+  GetModuleFileNameW(nullptr, path, static_cast<DWORD>(std::size(path)));
+  const std::filesystem::path exe = path;
+  if (AsciiLower(ToUtf8(exe.filename())) != "obs64.exe") return false;
+  std::ofstream(exe.parent_path() / L"working-directory.txt", std::ios::binary)
+      << ToUtf8(std::filesystem::current_path());
+  return true;
+}
+
+}  // namespace knobs::test
 
 namespace {
 
@@ -126,6 +145,18 @@ TEST(VirtualCablesAreToldApart) {
   CHECK(IsVirtualCable("Line 1 (Virtual Audio Cable)"));
   CHECK(!IsVirtualCable(kSpeakers));
   CHECK(!IsVirtualCable("Headphones (Audient iD4)"));
+}
+
+TEST(CablesHaveARecordingSide) {
+  CHECK(CableRecordingSide(kCableInput) == "CABLE Output");
+  CHECK(CableRecordingSide(kCable16) == "CABLE Output");
+  CHECK(CableRecordingSide("CABLE-A Input (VB-Audio Cable A)") == "CABLE-A Output");
+  CHECK(CableRecordingSide("VoiceMeeter Input (VB-Audio VoiceMeeter VAIO)") == "VoiceMeeter Output");
+  CHECK(CableRecordingSide("VoiceMeeter Aux Input (VB-Audio VoiceMeeter AUX VAIO)") == "VoiceMeeter Aux Output");
+  // Virtual Audio Cable names both sides alike, and other devices have none.
+  CHECK(CableRecordingSide("Line 1 (Virtual Audio Cable)").empty());
+  CHECK(CableRecordingSide(kSpeakers).empty());
+  CHECK(CableRecordingSide("CABLE Input").empty());
 }
 
 // --- Menu ---------------------------------------------------------------------------
@@ -290,38 +321,51 @@ TEST(MenuEscapesAmpersands) {
 // --- Settings file ------------------------------------------------------------------
 
 TEST(SettingsRoundTrip) {
-  core::Settings settings;
+  SavedSettings saved;
+  core::Settings& settings = saved.core;
   settings.obs_dir = fs::path(L"D:\\Games\\obs-studio");
   settings.obs_config = fs::path(L"D:\\Games\\obs-studio\\config\\Ö");
   settings.mic = "Mic\\Aux\nnew line";
   settings.cable = kCable16Id;
   settings.cable_name = kCable16;
   settings.pause_for_obs = false;
-  const std::string text = FormatSettings(settings);
+  saved.first_run = {.door = Door::kObsUser, .reached = FirstRunPage::kCable};
+  const std::string text = FormatSettings(saved);
   CHECK(text.find("Install=D:\\\\Games\\\\obs-studio\n") != std::string::npos);
   CHECK(text.find("Mic=Mic\\\\Aux\\nnew line\n") != std::string::npos);
-  CHECK(ParseSettings(text) == settings);
+  CHECK(text.find("[Setup]\nDone=false\nDoor=obs\nPage=cable\n") != std::string::npos);
+  CHECK(ParseSettings(text) == saved);
 
-  CHECK(ParseSettings("") == core::Settings{});
-  CHECK(FormatSettings({}) == "[OBS]\nPauseWhileOpen=true\n\n[Audio]\n");
-  CHECK(ParseSettings(FormatSettings({})) == core::Settings{});
-  CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=0\n").pause_for_obs);
-  CHECK(ParseSettings("[OBS]\nPauseWhileOpen=maybe\n").pause_for_obs);
+  CHECK(ParseSettings("") == SavedSettings{});
+  CHECK(FormatSettings({}) == "[OBS]\nPauseWhileOpen=true\n\n[Audio]\n\n[Setup]\nDone=false\n");
+  CHECK(ParseSettings(FormatSettings({})) == SavedSettings{});
+  CHECK(!ParseSettings("[OBS]\nPauseWhileOpen=0\n").core.pause_for_obs);
+  CHECK(ParseSettings("[OBS]\nPauseWhileOpen=maybe\n").core.pause_for_obs);
   // A name without its cable means nothing.
-  CHECK(ParseSettings("[Audio]\nCableName=CABLE Input\n").cable_name.empty());
+  CHECK(ParseSettings("[Audio]\nCableName=CABLE Input\n").core.cable_name.empty());
+
+  // Finished, the first run keeps nothing else. Unfinished, it resumes only
+  // at the first door's pages from the mic on.
+  saved.first_run = {.done = true, .door = Door::kObsUser, .reached = FirstRunPage::kWarnings};
+  CHECK(FormatSettings(saved).ends_with("[Setup]\nDone=true\n"));
+  CHECK(ParseSettings(FormatSettings(saved)).first_run == FirstRunProgress{.done = true});
+  CHECK((ParseSettings("[Setup]\nDoor=new\nPage=steps\n").first_run ==
+         FirstRunProgress{.door = Door::kNewToObs, .reached = FirstRunPage::kMic}));
+  CHECK(ParseSettings("[Setup]\nDoor=elsewhere\nPage=done\n").first_run ==
+        FirstRunProgress{.reached = FirstRunPage::kDone});
 
   const fs::path folder = fs::temp_directory_path() / std::format(L"knobs-tests-{}-settings", GetCurrentProcessId());
   const fs::path file = folder / L"settings.ini";
   std::error_code ec;
   fs::remove_all(folder, ec);
   const auto missing = LoadSettings(file);
-  CHECK(missing && *missing == core::Settings{});
-  CHECK(SaveSettings(file, settings).ok());
+  CHECK(missing && *missing == SavedSettings{});
+  CHECK(SaveSettings(file, saved).ok());
   const auto loaded = LoadSettings(file);
-  CHECK(loaded && *loaded == settings);
+  CHECK(loaded && loaded->core == saved.core && loaded->first_run.done);
   settings.mic.clear();
-  CHECK(SaveSettings(file, settings).ok());
-  CHECK(LoadSettings(file)->mic.empty());
+  CHECK(SaveSettings(file, saved).ok());
+  CHECK(LoadSettings(file)->core.mic.empty());
   CHECK(!fs::exists(folder / L"settings.ini.tmp"));
   fs::remove_all(folder, ec);
 }
@@ -363,6 +407,40 @@ TEST(StartWithWindowsUsesTheRunKey) {
   CHECK(!StartsWithWindows(entry));
   CHECK(SetStartWithWindows(entry, false).ok());
   CHECK(RegDeleteTreeW(HKEY_CURRENT_USER, scratch.c_str()) == ERROR_SUCCESS);
+}
+
+// --- Open OBS -----------------------------------------------------------------------
+
+TEST(OpenObsStartsInItsBinFolder) {
+  // An install whose obs64.exe is this binary, which then only notes where
+  // it was started (RunAsStandInObs).
+  const fs::path root = fs::temp_directory_path() / std::format(L"knobs-tests-{}-obs", GetCurrentProcessId());
+  const fs::path bin = root / L"bin" / L"64bit";
+  std::error_code ec;
+  fs::remove_all(root, ec);
+  fs::create_directories(bin);
+  wchar_t self[MAX_PATH * 2] = {};
+  GetModuleFileNameW(nullptr, self, static_cast<DWORD>(std::size(self)));
+  CHECK(fs::copy_file(self, bin / L"obs64.exe", ec));
+
+  CHECK(OpenObs(root).ok());
+  const fs::path note = bin / L"working-directory.txt";
+  std::string started_in;
+  for (int i = 0; i < 200 && started_in.empty(); ++i) {
+    std::this_thread::sleep_for(25ms);
+    std::ifstream file(note, std::ios::binary);
+    started_in.assign(std::istreambuf_iterator<char>(file), {});
+  }
+  CHECK(!started_in.empty() && fs::equivalent(fs::path(FromUtf8(started_in)), bin, ec));
+  CHECK(!OpenObs(root / L"elsewhere").ok());
+  CHECK(!OpenObs({}).ok());
+
+  // Gone once the stand-in has exited.
+  for (int i = 0; i < 200 && fs::exists(root); ++i) {
+    fs::remove_all(root, ec);
+    if (fs::exists(root)) std::this_thread::sleep_for(25ms);
+  }
+  CHECK(!fs::exists(root));
 }
 
 // --- Single instance ----------------------------------------------------------------

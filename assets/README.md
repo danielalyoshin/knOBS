@@ -12,10 +12,10 @@ The knob mark, the app icon and the horizontal lockup. The SVGs are the masters.
 
 | | On light backgrounds | On dark backgrounds |
 |---|---|---|
-| "kn" in the wordmark | `#17181b` | `#f2f0eb` |
+| "kn" in the wordmark | `#17181b` | `#e8eaee` |
 | "obs" in the wordmark | `#d63c42` | `#e5484d` |
 
-The knob is the same everywhere: a dark body, a `#e5484d` pointer and `#efebe3` ticks. The app icon's tile is `#ebe8e1`.
+The knob is the same everywhere: a dark body, a `#e5484d` pointer and `#e8eaee` ticks. The app icon's tile is `#e8eaee` too. That light tone is the knob's own cool graphite gray, lightened; it replaced the cream (`#f2f0eb`, `#efebe3`, `#ebe8e1`) on 2026-10-05.
 
 ## Rules
 

@@ -19,6 +19,9 @@ namespace knobs {
 inline constexpr std::string_view kDisplayName = KNOBS_DISPLAY_NAME;
 inline constexpr std::wstring_view kDisplayNameW = L"" KNOBS_DISPLAY_NAME;
 
+// The setup guide, a section of the README (plan.md, M4).
+inline constexpr std::string_view kSetupGuideUrl = "https://github.com/danielalyoshin/knobs#setup";
+
 }  // namespace knobs
 
 #endif  // RC_INVOKED

@@ -248,6 +248,17 @@ bool IsVirtualCable(std::string_view name) {
   return lower.find("vb-audio") != std::string::npos || lower.find("virtual audio cable") != std::string::npos;
 }
 
+std::string CableRecordingSide(std::string_view name) {
+  if (!IsVirtualCable(name)) return "";
+  const std::string short_name = ShortDeviceName(name);
+  for (const std::string_view input : {" In 16ch", " Input"}) {
+    if (short_name.size() > input.size() && short_name.ends_with(input)) {
+      return short_name.substr(0, short_name.size() - input.size()) + " Output";
+    }
+  }
+  return "";
+}
+
 Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows) {
   Menu menu;
   std::vector<MenuItem>& items = menu.items;

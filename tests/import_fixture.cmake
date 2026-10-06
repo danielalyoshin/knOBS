@@ -57,7 +57,8 @@ if(NOT code EQUAL 0)
 endif()
 expect("${output}" "[warn] pre-flight         Filter \"VST\" is a VST plugin (ReaComp-standalone.dll)")
 expect("${output}" "[warn] pre-flight         Filter \"NVIDIA Noise Removal\" is NVIDIA's noise removal")
-expect("${output}" "[warn] pre-flight         Compressor \"Ducking\" ducks under \"Music\"")
+expect("${output}" "[warn] pre-flight         Compressor \"Ducking\" turns the mic down under \"Music\" in OBS.")
+expect("${output}" " loads only the mic, so it keeps only this compressor's output gain (+2.5 dB), and the mic sounds as it does in OBS while nothing plays on \"Music\".")
 expect("${output}" "[--  ] pre-flight         Filter \"Gate\" is off in OBS, and stays off.")
 expect("${output}" "[--  ] pre-flight         Filter \"Third-Party\" (some_plugin_filter) isn't one ")
 expect("${output}" " has, but it's off in OBS anyway.")
@@ -65,11 +66,15 @@ expect("${output}" "[--  ] pre-flight         Filter \"Old VST\", a VST plugin, 
 expect("${output}" "The mic is muted and on push-to-talk in OBS.")
 expect("${output}" "sync offset of 50 ms")
 expect("${output}" "OBS doesn't monitor this mic")
-# Both VST filters are gone; the rest load in order, with source-level state.
+# Both VST filters are gone, and the compressor with a sidechain is a Gain
+# filter at its output gain, in its place; the rest load in order, with
+# source-level state.
 expect("${output}" "balance 0.30, Mono off, then 5 filter(s), then volume 0.50")
 expect("${output}" "1. nvidia_audiofx_filter \"NVIDIA Noise Removal\" (unknown to libobs")
+expect("${output}" "2. gain_filter \"Ducking\"")
 expect("${output}" "5. gain_filter \"Makeup\"")
 expect_not("${output}" "vst_filter")
+expect_not("${output}" "compressor_filter")
 expect("${output}" "libobs loaded the chain and ran its load callbacks; 3 warning(s)")
 
 # The global Mic/Aux device: no load callbacks, nothing to warn about.

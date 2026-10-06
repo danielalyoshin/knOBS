@@ -32,6 +32,7 @@ std::string Seconds(Controller::Clock::duration duration) {
 Controller::Controller(Backend& backend, Settings settings, Publish publish, Timing timing)
     : backend_(backend), settings_(std::move(settings)), publish_(std::move(publish)), timing_(std::move(timing)) {
   if (timing_.retry_delays.empty()) timing_.retry_delays.push_back(timing_.stall_timeout);
+  snapshot_.settings = settings_;
 }
 
 void Controller::Start(bool obs_running, Clock::time_point now) {
@@ -152,6 +153,7 @@ void Controller::Refresh() {
   problem_.reset();
   import_.reset();
   plan_.reset();
+  obs_install_ = {};
   profile_cable_id_.clear();
   profile_cable_name_.clear();
   const auto fail = [this](State state, std::string detail, SetupNeed setup = SetupNeed::kNone) {
@@ -160,6 +162,7 @@ void Controller::Refresh() {
 
   const ObsCheck obs = backend_.CheckObs(settings_);
   if (obs.found == ObsFound::kMissing) return fail(State::kObsMissing, obs.message);
+  obs_install_ = obs.install;
   if (obs.found == ObsFound::kUnsupported) return fail(State::kObsUnsupported, obs.message);
   // libobs stays loaded until the process ends (runtime::ObsRuntime).
   if (libobs_ && obs.install.version != libobs_->version) {
@@ -248,6 +251,10 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   next.chain_revision = chain_revision_;
   next.obs_cable = {profile_cable_name_, profile_cable_id_};
   next.outputs = devices_.outputs;
+  next.inputs = devices_.mics;
+  next.default_input = devices_.default_mic;
+  next.obs = obs_install_;
+  next.settings = settings_;
   if (import_) {
     next.mics = import_->mics;
     next.picked_mic = import_->picked;

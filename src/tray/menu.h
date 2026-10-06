@@ -81,6 +81,12 @@ std::string ShortDeviceName(std::string_view name);
 // Hi-Fi Cable, Virtual Audio Cable), going by its name.
 bool IsVirtualCable(std::string_view name);
 
+// The recording side of a virtual cable's playback device, which other apps
+// choose as their mic, by its short name: CABLE Input and CABLE In 16ch go
+// to CABLE Output, CABLE-A Input to CABLE-A Output, VoiceMeeter Input to
+// VoiceMeeter Output. Empty when it isn't known.
+std::string CableRecordingSide(std::string_view name);
+
 Menu BuildMenu(const core::Snapshot& snapshot, const core::Settings& settings, bool start_with_windows);
 
 // The menu item with `id`, anywhere in `items`, or null.
