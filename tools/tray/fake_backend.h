@@ -98,8 +98,10 @@ std::string UpdateObs(FakeWorld& world);
 
 class FakeBackend : public core::Backend {
  public:
-  FakeBackend(std::shared_ptr<SharedWorld> world, std::function<void(std::string_view line)> log)
-      : world_(std::move(world)), log_(std::move(log)) {}
+  // pick_by_number: as core::ObsBackendOptions::pick_by_number.
+  FakeBackend(std::shared_ptr<SharedWorld> world, std::function<void(std::string_view line)> log,
+              bool pick_by_number = false)
+      : world_(std::move(world)), log_(std::move(log)), pick_by_number_(pick_by_number) {}
 
   core::ObsCheck CheckObs(const core::Settings& settings) override;
   Result<import::ActiveObsConfig> ReadObsConfig(const core::Settings& settings,
@@ -118,6 +120,7 @@ class FakeBackend : public core::Backend {
  private:
   std::shared_ptr<SharedWorld> world_;
   std::function<void(std::string_view)> log_;
+  bool pick_by_number_ = false;
   int checks_ = 0;
   uint64_t packets_ = 0;
 };

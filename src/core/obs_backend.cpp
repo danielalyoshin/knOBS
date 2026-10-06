@@ -3,8 +3,10 @@
 
 #include <windows.h>
 
+#include <filesystem>
 #include <format>
 #include <utility>
+#include <vector>
 
 #include "app_info.h"
 #include "audio/audio_devices.h"
@@ -13,6 +15,28 @@
 #include "util/win_strings.h"
 
 namespace knobs::core {
+namespace {
+
+namespace fs = std::filesystem;
+
+// OBS's install where its installer puts it.
+Result<runtime::ObsInstall> FindInstalledObs() {
+  const std::vector<fs::path> candidates = runtime::ObsInstallCandidates();
+  if (candidates.empty()) {
+    return Error{std::format("OBS Studio isn't installed. {} needs {}.", kDisplayName,
+                             runtime::DescribeSupportedObsVersions())};
+  }
+  return runtime::FindObsInstall(candidates);
+}
+
+// OBS's settings where OBS keeps them for `install_root`.
+Result<import::ActiveObsConfig> ReadOwnObsConfig(const fs::path& install_root) {
+  auto root = import::FindObsConfigRoot(install_root);
+  if (!root) return Error{root.error()};
+  return import::FindActiveObsConfig(*root);
+}
+
+}  // namespace
 
 ObsBackend::ObsBackend(ObsBackendOptions options) : options_(std::move(options)) {}
 
@@ -26,12 +50,13 @@ ObsBackend::~ObsBackend() {
 
 ObsCheck ObsBackend::CheckObs(const Settings& settings) {
   ObsCheck check;
-  if (!settings.obs_dir && runtime::ObsInstallCandidates().empty()) {
-    check.message = std::format("OBS Studio isn't installed. {} needs {}.", kDisplayName,
-                                runtime::DescribeSupportedObsVersions());
-    return check;
+  auto install = settings.obs_dir ? runtime::InspectObsInstall(*settings.obs_dir) : FindInstalledObs();
+  // A picked folder OBS has gone from, say after OBS was reinstalled where
+  // its installer puts it: OBS is looked for there, as with no pick. If it
+  // isn't there either, the picked folder's error says more.
+  if (!install && settings.obs_dir) {
+    if (auto installed = FindInstalledObs()) install = std::move(installed);
   }
-  auto install = settings.obs_dir ? runtime::InspectObsInstall(*settings.obs_dir) : runtime::FindObsInstall();
   if (!install) {
     check.message = install.error();
     return check;
@@ -48,15 +73,15 @@ ObsCheck ObsBackend::CheckObs(const Settings& settings) {
 
 Result<import::ActiveObsConfig> ObsBackend::ReadObsConfig(const Settings& settings,
                                                           const runtime::ObsInstall& install) {
-  import::ObsConfigRoot root;
-  if (settings.obs_config) {
-    root = import::ObsConfigRootAt(*settings.obs_config);
-  } else {
-    auto found = import::FindObsConfigRoot(install.root);
-    if (!found) return Error{found.error()};
-    root = *found;
+  if (!settings.obs_config) return ReadOwnObsConfig(install.root);
+  auto config = import::FindActiveObsConfig(import::ObsConfigRootAt(*settings.obs_config));
+  // A picked folder that can't be read, such as the wrong one: OBS's settings
+  // where OBS keeps them are read instead, so opening OBS to make them works.
+  // If those can't be read either, the picked folder's error says more.
+  if (!config) {
+    if (auto own = ReadOwnObsConfig(install.root)) config = std::move(own);
   }
-  return import::FindActiveObsConfig(root);
+  return config;
 }
 
 Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) {
@@ -89,7 +114,8 @@ Result<MicImport> ObsBackend::ImportMic(const import::ActiveObsConfig& config, s
   }
   MicImport result;
   result.mics = (*collection)->Mics();
-  auto picked = import::PickMic(result.mics, pick);
+  auto picked =
+      options_.pick_by_number ? import::PickMic(result.mics, pick) : import::PickMicByName(result.mics, pick);
   if (!picked) {
     result.pick_error = picked.error();
     return result;

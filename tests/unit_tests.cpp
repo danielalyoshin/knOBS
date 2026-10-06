@@ -617,6 +617,26 @@ TEST(PickMicByNumberOrName) {
   CHECK(!import::PickMic({}, "").ok());
 }
 
+TEST(SavedMicPickIsAName) {
+  // As the tray saves picks: a name that's a number is still a name.
+  std::vector<import::MicCandidate> mics;
+  for (const char* name : {"Desk", "Podcast Mic", "1", "7", "podcast mic"}) mics.push_back({.name = name});
+  const auto pick = [&](std::string_view name) { return import::PickMicByName(mics, name); };
+  CHECK(pick("1").ok() && *pick("1") == 2);
+  CHECK(pick("7").ok() && *pick("7") == 3);
+  const auto numbered = pick("2");
+  CHECK(!numbered.ok() && numbered.error().starts_with("There's no mic named \"2\". Choose one:"));
+  // The exact name first, then one that differs only in case.
+  CHECK(pick("Podcast Mic").ok() && *pick("Podcast Mic") == 1);
+  CHECK(pick("podcast mic").ok() && *pick("podcast mic") == 4);
+  CHECK(pick("DESK").ok() && *pick("DESK") == 0);
+  const auto ambiguous = pick("PODCAST MIC");
+  CHECK(!ambiguous.ok() && ambiguous.error().starts_with("Several mics are named"));
+  CHECK(!pick("").ok());
+  CHECK(import::PickMicByName({mics[2]}, "").ok());
+  CHECK(!import::PickMicByName({}, "1").ok());
+}
+
 // --- Devices -------------------------------------------------------------------
 
 TEST(FindDeviceByIdOrName) {

@@ -32,6 +32,8 @@ std::vector<std::filesystem::path> ObsInstallCandidates();
 // The first candidate that passes InspectObsInstall(). Steam and portable
 // installs need PickObsInstallFolder().
 Result<ObsInstall> FindObsInstall();
+// The same, over candidates already listed by ObsInstallCandidates().
+Result<ObsInstall> FindObsInstall(const std::vector<std::filesystem::path>& candidates);
 
 // Asks the user for the OBS folder. `owner` is an HWND or null. Returns
 // nullopt if they cancel. Call from a thread that can host a COM STA.

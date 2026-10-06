@@ -50,8 +50,14 @@ struct MicCandidate {
 
 // Picks the mic that `query` names: its number in `mics`, counting from 1,
 // or its name, ignoring ASCII case. An empty query picks the only mic.
-// Returns its index in `mics`.
+// Returns its index in `mics`. The tools' --pick.
 Result<size_t> PickMic(const std::vector<MicCandidate>& mics, std::string_view query);
+
+// Picks the mic named `name`, as the tray saves a pick (core::Settings::mic):
+// a mic named "2" is that mic, never the second one. The exact name comes
+// first, then one that differs only in ASCII case. An empty name picks the
+// only mic. Returns its index in `mics`.
+Result<size_t> PickMicByName(const std::vector<MicCandidate>& mics, std::string_view name);
 
 // "1. "Mic/Aux" (AuxAudioDevice1, monitored)"
 std::string DescribeMic(const MicCandidate& mic, size_t number);

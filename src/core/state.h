@@ -24,7 +24,7 @@ struct Settings {
   // OBS's settings folder, the one holding obs-studio\. Default: where OBS
   // keeps it (import::FindObsConfigRoot).
   std::optional<std::filesystem::path> obs_config;
-  // Which mic, as import::PickMic takes it. Empty picks the only one.
+  // Which mic, by name (import::PickMicByName). Empty picks the only one.
   std::string mic;
   // The playback device to send the mic to, by endpoint ID. Empty: the OBS
   // profile's monitoring device.

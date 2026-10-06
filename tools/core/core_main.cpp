@@ -281,6 +281,7 @@ int Run(const Options& options) {
   core::ObsBackendOptions backend_options;
   backend_options.log_prefix = L"core ";
   backend_options.verbose = options.verbose;
+  backend_options.pick_by_number = true;  // --pick takes a number too.
   backend_options.on_shutdown = [&leaks](long live, const runtime::ObsLog& log) {
     leaks = live;
     Check(live == 0, "shutdown", live == 0 ? "0 leaked allocations" : std::format("{} libobs allocations leaked", live));

@@ -703,11 +703,12 @@ int Run(const Options& options) {
     core_options.watch_devices = false;
     const auto log = [](std::string_view line) { Print(std::format("{:13}log: {}\n", "", line)); };
     std::unique_ptr<core::Backend> backend;
+    // --pick takes a number too.
     if (fixture) {
-      backend = std::make_unique<FixtureBackend>(core::ObsBackendOptions{.log_prefix = L"tray "}, g_session->world,
-                                                 log);
+      backend = std::make_unique<FixtureBackend>(
+          core::ObsBackendOptions{.log_prefix = L"tray ", .pick_by_number = true}, g_session->world, log);
     } else {
-      backend = std::make_unique<FakeBackend>(g_session->world, log);
+      backend = std::make_unique<FakeBackend>(g_session->world, log, true);
     }
     auto started = core::Core::Start(std::move(backend), observer, std::move(core_options));
     if (started) g_session->core = started->get();

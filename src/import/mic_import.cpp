@@ -268,30 +268,55 @@ void CheckSourceState(const runtime::ObsApi& api, obs_data_t* source, const MicC
   }
 }
 
-}  // namespace
-
-Result<size_t> PickMic(const std::vector<MicCandidate>& mics, std::string_view query) {
+// The mics, numbered, one to a line, for an error that asks to choose one.
+std::string MicList(const std::vector<MicCandidate>& mics) {
   std::string list;
   for (size_t i = 0; i < mics.size(); ++i) list += std::format("\n  {}", DescribeMic(mics[i], i + 1));
-  if (mics.empty()) return Error{"The scene collection has no mic (win-wasapi input) sources."};
-  if (query.empty()) {
-    if (mics.size() == 1) return size_t{0};
-    return Error{std::format("The scene collection has {} mics. Choose one:{}", mics.size(), list)};
-  }
-  size_t number = 0;
-  const auto [end, ec] = std::from_chars(query.data(), query.data() + query.size(), number);
-  if (ec == std::errc() && end == query.data() + query.size()) {
-    if (number >= 1 && number <= mics.size()) return number - 1;
-    return Error{std::format("There's no mic {}. Choose one:{}", number, list)};
-  }
-  const std::string needle = AsciiLower(query);
+  return list;
+}
+
+// The mics whose name is `name`, ignoring ASCII case.
+std::vector<size_t> MicsNamed(const std::vector<MicCandidate>& mics, std::string_view name) {
+  const std::string needle = AsciiLower(name);
   std::vector<size_t> matches;
   for (size_t i = 0; i < mics.size(); ++i) {
     if (AsciiLower(mics[i].name) == needle) matches.push_back(i);
   }
+  return matches;
+}
+
+// What an empty pick picks: the only mic.
+Result<size_t> OnlyMic(const std::vector<MicCandidate>& mics) {
+  if (mics.empty()) return Error{"The scene collection has no mic (win-wasapi input) sources."};
+  if (mics.size() == 1) return size_t{0};
+  return Error{std::format("The scene collection has {} mics. Choose one:{}", mics.size(), MicList(mics))};
+}
+
+}  // namespace
+
+Result<size_t> PickMic(const std::vector<MicCandidate>& mics, std::string_view query) {
+  if (mics.empty() || query.empty()) return OnlyMic(mics);
+  size_t number = 0;
+  const auto [end, ec] = std::from_chars(query.data(), query.data() + query.size(), number);
+  if (ec == std::errc() && end == query.data() + query.size()) {
+    if (number >= 1 && number <= mics.size()) return number - 1;
+    return Error{std::format("There's no mic {}. Choose one:{}", number, MicList(mics))};
+  }
+  const std::vector<size_t> matches = MicsNamed(mics, query);
   if (matches.size() == 1) return matches.front();
   return Error{std::format("{} named \"{}\". Choose by number:{}",
-                           matches.empty() ? "There's no mic" : "Several mics are", query, list)};
+                           matches.empty() ? "There's no mic" : "Several mics are", query, MicList(mics))};
+}
+
+Result<size_t> PickMicByName(const std::vector<MicCandidate>& mics, std::string_view name) {
+  if (mics.empty() || name.empty()) return OnlyMic(mics);
+  for (size_t i = 0; i < mics.size(); ++i) {
+    if (mics[i].name == name) return i;
+  }
+  const std::vector<size_t> matches = MicsNamed(mics, name);
+  if (matches.size() == 1) return matches.front();
+  return Error{std::format("{} named \"{}\". Choose one:{}", matches.empty() ? "There's no mic" : "Several mics are",
+                           name, MicList(mics))};
 }
 
 std::string DescribeMic(const MicCandidate& mic, size_t number) {

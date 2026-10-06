@@ -22,6 +22,9 @@ struct ObsBackendOptions {
   // Called once libobs has shut down, with the libobs allocations still live
   // (anything but 0 is a leak) and the log. For the dev tools.
   std::function<void(long leaks, const runtime::ObsLog& log)> on_shutdown;
+  // Read Settings::mic as the tools' --pick: a number or a name
+  // (import::PickMic). Otherwise it's a name, as the tray saves it.
+  bool pick_by_number = false;
 };
 
 // The real thing: the user's OBS install and settings, libobs from its

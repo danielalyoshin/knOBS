@@ -13,14 +13,17 @@
 #include <fstream>
 #include <future>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
 
 #include "app_info.h"
+#include "core/controller.h"
 #include "core/state.h"
 #include "test_harness.h"
 #include "tray/autostart.h"
+#include "tray/fake_backend.h"
 #include "tray/menu.h"
 #include "tray/open_obs.h"
 #include "tray/settings_file.h"
@@ -250,6 +253,41 @@ TEST(MenuMicStartsWithSameAsObs) {
   missing.state = State::kObsMissing;
   CHECK(!FindItem(BuildMenu(missing, {}, false).items, kIdMicMenu)->enabled);
   CHECK(!FindItem(BuildMenu(core::Snapshot{}, {}, false).items, kIdCableMenu)->enabled);
+}
+
+TEST(MenuPickMeansTheMicByThatName) {
+  // The real core on knobs-tray's fake world, whose OBS has mics named Desk,
+  // 1 and 7. A pick is saved by name: 1 isn't the first mic, and 7 isn't a
+  // seventh.
+  tools::FakeWorld world = tools::DefaultWorld();
+  const import::ImportedMic mic = world.collection.front();
+  world.collection.clear();
+  for (const char* name : {"Desk", "1", "7"}) {
+    world.collection.push_back(mic);
+    world.collection.back().mic.name = name;
+    world.collection.back().chain_key = name;
+  }
+  tools::FakeBackend backend(std::make_shared<tools::SharedWorld>(world), [](std::string_view) {});
+  core::Snapshot last;
+  core::Controller controller(backend, {}, [&last](const core::Snapshot& snapshot) { last = snapshot; });
+  const auto now = core::Controller::Clock::now();
+  controller.Start(false, now);
+  CHECK(last.setup == SetupNeed::kPickMic);
+  for (const std::string name : {"1", "7"}) {
+    const Menu menu = BuildMenu(last, last.settings, false);
+    const auto at = std::find(menu.mics.begin(), menu.mics.end(), name);
+    CHECK(at != menu.mics.end());
+    if (at == menu.mics.end()) return;
+    const unsigned id = kIdMicFirst + static_cast<unsigned>(at - menu.mics.begin());
+    const auto picked = SettingsForPick(menu, id, last.settings);
+    CHECK(picked && picked->mic == name);
+    if (!picked) return;
+    controller.Apply(*picked, now);
+    CHECK(last.state == State::kRunning && last.chain && last.chain->mic == name);
+    const Menu after = BuildMenu(last, last.settings, false);
+    const MenuItem* item = FindItem(after.items, id);
+    CHECK(item && item->checked);
+  }
 }
 
 TEST(MenuCableListsCablesFirst) {

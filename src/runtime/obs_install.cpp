@@ -119,9 +119,11 @@ std::vector<fs::path> ObsInstallCandidates() {
   return candidates;
 }
 
-Result<ObsInstall> FindObsInstall() {
+Result<ObsInstall> FindObsInstall() { return FindObsInstall(ObsInstallCandidates()); }
+
+Result<ObsInstall> FindObsInstall(const std::vector<fs::path>& candidates) {
   std::string failures;
-  for (const fs::path& candidate : ObsInstallCandidates()) {
+  for (const fs::path& candidate : candidates) {
     auto install = InspectObsInstall(candidate);
     if (install) return install;
     failures += "\n  " + install.error();

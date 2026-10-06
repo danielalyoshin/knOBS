@@ -281,7 +281,7 @@ Result<core::MicImport> FakeBackend::ImportMic(const import::ActiveObsConfig&, s
   const FakeWorld world = world_->Get();
   core::MicImport result;
   for (const import::ImportedMic& mic : world.collection) result.mics.push_back(mic.mic);
-  auto picked = import::PickMic(result.mics, pick);
+  auto picked = pick_by_number_ ? import::PickMic(result.mics, pick) : import::PickMicByName(result.mics, pick);
   if (!picked) {
     result.pick_error = picked.error();
     return result;

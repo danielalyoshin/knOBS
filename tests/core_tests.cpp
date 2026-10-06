@@ -12,20 +12,24 @@
 #include <condition_variable>
 #include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 #include "core/backend.h"
 #include "core/controller.h"
 #include "core/core.h"
+#include "core/obs_backend.h"
 #include "core/obs_process.h"
 #include "core/state.h"
 #include "test_harness.h"
+#include "util/win_strings.h"
 
 namespace {
 
@@ -699,6 +703,68 @@ TEST(CorePublishesOnlyChanges) {
   f.controller.Pause(f.now);
   f.controller.DevicesChanged(f.now);
   CHECK(f.published.size() == count && !f.controller.NextDeadline());
+}
+
+// --- ObsBackend --------------------------------------------------------------------
+
+// A fresh folder under %TEMP%, removed when the test ends.
+struct ScratchDir {
+  std::filesystem::path path;
+  explicit ScratchDir(std::wstring_view name)
+      : path(std::filesystem::temp_directory_path() /
+             std::format(L"knobs-tests-{}-{}", GetCurrentProcessId(), name)) {
+    std::filesystem::remove_all(path);
+    std::filesystem::create_directories(path);
+  }
+  ~ScratchDir() {
+    std::error_code ec;
+    std::filesystem::remove_all(path, ec);
+  }
+};
+
+void WriteFile(const std::filesystem::path& path, std::string_view contents) {
+  std::filesystem::create_directories(path.parent_path());
+  std::ofstream(path, std::ios::binary) << contents;
+}
+
+TEST(ObsBackendLooksForObsWhenThePickedFolderHasNone) {
+  // A folder picked with Find OBS… that OBS has gone from, say after it was
+  // reinstalled where its installer puts it: OBS is found as with no pick.
+  const ScratchDir dir(L"picked-obs");
+  ObsBackend backend({});
+  const ObsCheck picked = backend.CheckObs({.obs_dir = dir.path});
+  const ObsCheck found = backend.CheckObs({});
+  CHECK(picked.found == found.found && picked.install == found.install);
+  // When OBS isn't there either, the picked folder's error says what's wrong.
+  if (found.found == ObsFound::kMissing) {
+    CHECK(picked.message.find("isn't a complete OBS Studio install") != std::string::npos);
+  }
+}
+
+TEST(ObsBackendReadsObsOwnSettingsWhenThePickedFolderCantBeRead) {
+  // A portable install, so OBS keeps its settings in its config folder.
+  const ScratchDir dir(L"picked-settings");
+  const runtime::ObsInstall install{dir.path / L"obs", {32, 2, 2}};
+  WriteFile(install.root / L"portable_mode.txt", "");
+  const auto write_settings = [](const std::filesystem::path& root, const std::wstring& profile) {
+    WriteFile(root / L"obs-studio" / L"global.ini", "");
+    WriteFile(root / L"obs-studio" / L"user.ini",
+              std::format("[Basic]\nProfile={}\nSceneCollection=Untitled\n", ToUtf8(profile)));
+    WriteFile(root / L"obs-studio" / L"basic" / L"profiles" / profile / L"basic.ini", "");
+  };
+  ObsBackend backend({});
+  // The wrong folder picked, before OBS has made its settings.
+  const Settings wrong{.obs_config = dir.path / L"wrong"};
+  auto config = backend.ReadObsConfig(wrong, install);
+  CHECK(!config.ok() && config.error().find("\\wrong\\obs-studio") != std::string::npos);
+  // OBS opened and closed, which made them.
+  write_settings(install.root / L"config", L"Own");
+  config = backend.ReadObsConfig(wrong, install);
+  CHECK(config.ok() && config->profile == "Own");
+  // A picked folder that can be read comes first.
+  write_settings(dir.path / L"picked", L"Picked");
+  config = backend.ReadObsConfig({.obs_config = dir.path / L"picked"}, install);
+  CHECK(config.ok() && config->profile == "Picked");
 }
 
 // --- ObsWatch ----------------------------------------------------------------------
