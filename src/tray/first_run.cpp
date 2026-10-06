@@ -10,7 +10,6 @@
 #include "app_info.h"
 #include "runtime/obs_version.h"
 #include "tray/menu.h"
-#include "util/win_strings.h"
 
 namespace knobs::tray {
 namespace {

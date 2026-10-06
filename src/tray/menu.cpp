@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "tray/menu.h"
 
-#include <algorithm>
 #include <format>
 #include <utility>
 
@@ -18,6 +17,7 @@ using core::State;
 constexpr size_t kMaxMics = kIdCableFirst - kIdMicFirst;
 constexpr size_t kMaxCables = kIdCableLast - kIdCableFirst + 1;
 
+using audio::FindById;
 using audio::kDefaultDevice;
 using audio::SameId;
 
@@ -123,15 +123,12 @@ MenuItem CableMenu(const core::Snapshot& snapshot, const core::Settings& setting
   }
   const audio::AudioDevice& obs = snapshot.obs_cable;
   if (!obs.id.empty() && !SameId(obs.id, kDefaultDevice)) {
-    const auto connected = std::find_if(snapshot.outputs.begin(), snapshot.outputs.end(),
-                                        [&](const audio::AudioDevice& device) { return SameId(device.id, obs.id); });
-    const std::string& name = connected != snapshot.outputs.end() ? connected->name
-                              : obs.name.empty()                  ? obs.id
-                                                                  : obs.name;
+    const audio::AudioDevice* connected = FindById(snapshot.outputs, obs.id);
+    const std::string& name = connected ? connected->name : obs.name.empty() ? obs.id : obs.name;
     // Offered when OBS monitors to a cable, and shown whenever it's the
     // choice, so the check mark has somewhere to go.
     if (IsVirtualCable(name) || settings.cable.empty()) {
-      const std::string label = connected != snapshot.outputs.end()
+      const std::string label = connected
                                     ? std::format("&Same as OBS ({})", Escape(ShortDeviceName(name)))
                                     : std::format("&Same as OBS ({}, not connected)", Escape(ShortDeviceName(name)));
       submenu.items.push_back(Choice(kIdCableSameAsObs, label, settings.cable.empty()));

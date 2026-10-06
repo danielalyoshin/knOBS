@@ -6,7 +6,6 @@
 #include <utility>
 
 #include "app_info.h"
-#include "util/win_strings.h"
 
 namespace knobs::core {
 namespace {
