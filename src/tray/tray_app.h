@@ -121,8 +121,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void HideBalloon();
   // The first run shows the state while it's unfinished or open.
   bool Quiet() const;
-  // Restarts to follow OBS, when the core needs it and nothing's open.
-  // Returns whether this copy is quitting.
+  // Restarts to follow OBS, when the core needs it and nothing's open, or
+  // once what's open closes. Returns whether this copy is quitting.
   bool RestartByItself();
   POINT IconPoint() const;
   void Execute(unsigned id, const Menu& menu);
@@ -136,7 +136,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   // FirstRunHost.
   void ApplySettings(const core::Settings& settings) override;
   void Reimport() override;
-  void Restart() override;
+  bool Restart() override;
   Status StartObs(const std::filesystem::path& install_root) override;
   void FinishFirstRun(bool start_with_windows) override;
   void SaveFirstRun(const FirstRunProgress& progress) override;
@@ -162,7 +162,7 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   std::unique_ptr<core::Core> core_;
   FirstRunDialog* first_run_dialog_ = nullptr;  // While it's open.
   Notifier notifier_;
-  bool restart_tried_ = false;  // While the core needs a restart.
+  bool restart_tried_ = false;  // Since the core said it needs a restart.
 
   std::mutex pending_mutex_;  // Guards pending_.
   std::optional<core::Snapshot> pending_;

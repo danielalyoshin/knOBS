@@ -66,6 +66,7 @@ add_library(knobs_tray STATIC
   src/tray/first_run_dialog.cpp
   src/tray/menu.cpp
   src/tray/menu_theme.cpp
+  src/tray/message_dialog.cpp
   src/tray/notices.cpp
   src/tray/open_obs.cpp
   src/tray/settings_file.cpp

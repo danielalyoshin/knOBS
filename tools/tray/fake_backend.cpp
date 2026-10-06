@@ -70,6 +70,16 @@ void NoCable(FakeWorld& world) {
   world.spare_cables = {{kCableInputName, kCableInputId}};
 }
 
+// Both backends' chain, which opens no device: it fails as the world says,
+// and its packets count from 0.
+Status StartFakeChain(const SharedWorld& world, const core::ChainPlan& plan, core::Backend& backend,
+                      uint64_t& packets) {
+  if (const FakeWorld now = world.Get(); now.chain_error) return Error{*now.chain_error};
+  backend.Log(std::format("The chain would run into \"{}\".", plan.cable.name));
+  packets = 0;
+  return Ok{};
+}
+
 }  // namespace
 
 FakeWorld DefaultWorld() {
@@ -105,7 +115,8 @@ const std::vector<FakeScenario>& FakeScenarios() {
   static const std::vector<FakeScenario> scenarios = {
       {"running", "Mic/Aux with 4 filters into CABLE In 16ch", [](FakeWorld&, FakeScript&) {}},
       {"paused", "running, then paused from the menu", [](FakeWorld&, FakeScript& script) { script.pause = true; }},
-      {"obs-open", "OBS is open, so knobs pauses", [](FakeWorld&, FakeScript& script) { script.obs_running = true; }},
+      {"obs-open", std::format("OBS is open, so {} pauses", kDisplayName),
+       [](FakeWorld&, FakeScript& script) { script.obs_running = true; }},
       {"mic-missing", "the mic's recording device isn't connected",
        [](FakeWorld& world, FakeScript&) {
          world.devices.mics.clear();
@@ -169,7 +180,7 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {33, 0, 0}},
                       runtime::UnsupportedObsMessage("33.0.0")};
        }},
-      {"restart", "OBS was updated to 32.2.3 while knobs ran, so it restarts",
+      {"restart", std::format("OBS was updated to 32.2.3 while {} ran, so it restarts", kDisplayName),
        [](FakeWorld& world, FakeScript& script) {
          world.obs_later = world.obs;
          world.obs_later->install.version = {32, 2, 3};
@@ -281,17 +292,11 @@ Result<core::MicImport> FakeBackend::ImportMic(const import::ActiveObsConfig&, s
 }
 
 Status FakeBackend::StartChain(const core::ChainPlan& plan) {
-  if (const FakeWorld world = world_->Get(); world.chain_error) return Error{*world.chain_error};
-  Log(std::format("The chain would run into \"{}\".", plan.cable.name));
-  packets_ = 0;
-  return Ok{};
+  return StartFakeChain(*world_, plan, *this, packets_);
 }
 
 Status FixtureBackend::StartChain(const core::ChainPlan& plan) {
-  if (const FakeWorld world = world_->Get(); world.chain_error) return Error{*world.chain_error};
-  Log(std::format("The chain would run into \"{}\".", plan.cable.name));
-  packets_ = 0;
-  return Ok{};
+  return StartFakeChain(*world_, plan, *this, packets_);
 }
 
 }  // namespace knobs::tools

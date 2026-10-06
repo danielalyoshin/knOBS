@@ -10,7 +10,7 @@
 #include "app_info.h"
 #include "import/obs_config.h"
 #include "runtime/obs_install.h"
-#include "tray/resource.h"
+#include "tray/message_dialog.h"
 #include "util/pick_folder.h"
 #include "util/win_strings.h"
 
@@ -21,18 +21,12 @@ namespace {
 // it moves between them.
 constexpr UINT kWidthDlu = 320;
 
-HICON LoadKnobIcon(HINSTANCE instance, int size) {
-  HICON icon = nullptr;
-  if (FAILED(LoadIconMetric(instance, MAKEINTRESOURCEW(IDI_KNOBS), size, &icon))) return nullptr;
-  return icon;
-}
-
 }  // namespace
 
 FirstRunDialog::FirstRunDialog(FirstRunHost& host, HINSTANCE instance, FirstRun first_run)
     : host_(host), instance_(instance), first_run_(std::move(first_run)), saved_(first_run_.progress()) {
-  icon_large_ = LoadKnobIcon(instance_, LIM_LARGE);
-  icon_small_ = LoadKnobIcon(instance_, LIM_SMALL);
+  icon_large_ = LoadAppIcon(instance_, LIM_LARGE);
+  icon_small_ = LoadAppIcon(instance_, LIM_SMALL);
 }
 
 FirstRunDialog::~FirstRunDialog() {
@@ -141,9 +135,9 @@ HRESULT FirstRunDialog::OnButton(int id) {
       }
       break;
     case FirstRunAction::Kind::kRestart:
-      // The tray quits, which ends the dialog's loop too.
-      host_.Restart();
-      close = true;
+      // The tray quits, which ends the dialog's loop too. If the new copy
+      // couldn't start, the tray said so, and the page stays.
+      close = host_.Restart();
       break;
     case FirstRunAction::Kind::kFinish:
       host_.FinishFirstRun(action.start_with_windows);
@@ -271,17 +265,12 @@ void FirstRunDialog::Save() {
 }
 
 void FirstRunDialog::ShowError(const std::string& text) {
-  const std::wstring title = std::format(L"{} setup", kDisplayNameW);
-  const std::wstring content = FromUtf8(text);
-  TASKDIALOGCONFIG config = {sizeof(config)};
-  config.hwndParent = window_;
-  config.hInstance = instance_;
-  config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION | TDF_POSITION_RELATIVE_TO_WINDOW;
-  config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-  config.pszWindowTitle = title.c_str();
-  config.pszMainIcon = TD_WARNING_ICON;
-  config.pszContent = content.c_str();
-  TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
+  // Over the first run, which can't be clicked meanwhile: a button's handler
+  // is running.
+  ShowMessageDialog(instance_, {.owner = window_,
+                                .title = std::format(L"{} setup", kDisplayNameW),
+                                .icon = TD_WARNING_ICON,
+                                .content = FromUtf8(text)});
 }
 
 }  // namespace knobs::tray

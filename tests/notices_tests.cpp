@@ -13,6 +13,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "app_info.h"
@@ -22,6 +23,7 @@
 #include "tray/badge.h"
 #include "tray/fake_backend.h"
 #include "tray/notices.h"
+#include "util/win_strings.h"
 
 namespace {
 
@@ -335,6 +337,62 @@ TEST(NoticesSayAFilterKnobsCantRun) {
     tools::EditChain(world);
   });
   CHECK(f.events.size() == 3 && f.last.kind == Notice::Kind::kFilterWarnings);
+}
+
+// The notification for `warnings`, new on Mic/Aux when OBS closes.
+Notice WarningsNotice(const std::vector<std::string>& warnings) {
+  Fixture f;
+  f.Start();
+  f.ObsOpens();
+  f.ObsCloses([&warnings](FakeWorld& world) {
+    for (const std::string& warning : warnings) world.collection.front().notes.push_back({true, warning});
+  });
+  return f.last;
+}
+
+TEST(NoticesFitWarningsInTheBalloon) {
+  constexpr std::string_view kMore = " Click to see them all.";
+  // A balloon's text holds 255 UTF-16 units (NOTIFYICONDATAW::szInfo).
+  const auto fits = [](const Notice& notice) { return FromUtf8(notice.text).size() <= 255; };
+  // The text shows the start of `warning`, up to the end of a word, then "…".
+  const auto cut_at_word = [](const Notice& notice, const std::string& warning) {
+    const size_t cut = notice.text.find("…");
+    return cut != std::string::npos && cut > 0 && warning.starts_with(notice.text.substr(0, cut)) &&
+           std::string_view(" ,.;:").find(warning[cut]) != std::string_view::npos;
+  };
+  const auto ducking = [](std::string_view sidechain) {
+    return std::format("Compressor \"Duck\" turns the mic down under \"{0}\" in OBS. {1} loads only the mic, so it "
+                       "keeps only this compressor's output gain (+3.0 dB), and the mic sounds as it does in OBS "
+                       "while nothing plays on \"{0}\".",
+                       sidechain, kDisplayName);
+  };
+  const auto unknown = [](std::string_view name, std::string_view type) {
+    return std::format("Filter \"{}\" ({}) isn't one {} has. It passes audio through untouched.", name, type,
+                       kDisplayName);
+  };
+  const std::string vst = std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run "
+                                      "VST plugins yet, so it leaves the filter out.",
+                                      kDisplayName);
+
+  // As many whole warnings as fit with the line that says there are more.
+  Notice notice =
+      WarningsNotice({vst, unknown("DeepFilterNet", "deepfilternet_noise_suppression_filter"), ducking("Discord")});
+  CHECK(notice.text == vst + std::string(kMore) && fits(notice));
+  // A first warning too long for that line: as much of it as fits.
+  const std::string long_ducking = ducking("Discord Desktop Audio");
+  notice = WarningsNotice({long_ducking, vst});
+  CHECK(fits(notice) && notice.text.ends_with(kMore) && cut_at_word(notice, long_ducking));
+  // Alone, and too long for the balloon.
+  const std::string longer_ducking = ducking("Desktop Audio (Discord, Spotify and the game)");
+  notice = WarningsNotice({longer_ducking});
+  CHECK(fits(notice) && !notice.text.ends_with(kMore) && cut_at_word(notice, longer_ducking));
+  // Measured as the balloon holds them: these fit whole, though their UTF-8
+  // doesn't.
+  const std::string cyrillic = unknown("Шумоподавление для микрофона", "rnnoise_ru");
+  const std::string cyrillic_2 = unknown("Подавление эха и шумов в комнате", "echo_ru");
+  CHECK(cyrillic.size() + 1 + cyrillic_2.size() > 255);
+  notice = WarningsNotice({cyrillic, cyrillic_2});
+  CHECK(notice.text == cyrillic + " " + cyrillic_2 && fits(notice));
 }
 
 // --- OBS updates --------------------------------------------------------------------

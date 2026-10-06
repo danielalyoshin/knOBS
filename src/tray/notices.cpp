@@ -189,17 +189,43 @@ Notice ChainChanged(const core::Snapshot& snapshot, std::string_view mic_before)
           .text = std::format("{} now runs: {}", kDisplayName, FullChain(*snapshot.chain))};
 }
 
+// A text's length as a balloon holds it (kMaxText): in UTF-16 units.
+size_t Length(std::string_view text) { return FromUtf8(text).size(); }
+
+// `text`, cut after a word and ended with "…" to fit in `length`.
+std::string Shortened(std::string_view text, size_t length) {
+  std::wstring wide = FromUtf8(text);
+  if (wide.size() <= length) return std::string(text);
+  const size_t space = wide.rfind(L' ', length - 1);
+  wide.resize(space == std::wstring::npos ? length - 1 : space);
+  while (!wide.empty() && std::wstring_view(L",.;:").find(wide.back()) != std::wstring_view::npos) wide.pop_back();
+  return ToUtf8(wide) + "…";
+}
+
 Notice FilterWarnings(const core::Snapshot& snapshot, const std::vector<std::string>& added) {
   Notice notice{.kind = Kind::kFilterWarnings, .sound = true, .page = FirstRunPage::kWarnings};
   const std::string& mic = snapshot.chain->mic;
   notice.title = added.size() == 1 ? std::format("{} has a filter {} can't run", mic, kDisplayName)
                                    : std::format("{} has {} filters {} can't run", mic, added.size(), kDisplayName);
-  for (const std::string& warning : added) {
-    if (!notice.text.empty() && notice.text.size() + 1 + warning.size() > kMaxText) {
-      notice.text += " Click to see them all.";
-      break;
+  std::string all;
+  for (const std::string& warning : added) all += (all.empty() ? "" : " ") + warning;
+  if (Length(all) <= kMaxText) {
+    notice.text = std::move(all);
+  } else if (added.size() == 1) {
+    notice.text = Shortened(all, kMaxText);
+  } else {
+    // The warnings that fit whole, with room for the line that says there
+    // are more.
+    constexpr std::string_view kMore = " Click to see them all.";
+    const size_t room = kMaxText - Length(kMore);
+    for (const std::string& warning : added) {
+      std::string next = notice.text.empty() ? warning : notice.text + " " + warning;
+      if (Length(next) > room) break;
+      notice.text = std::move(next);
     }
-    notice.text += (notice.text.empty() ? "" : " ") + warning;
+    // Not even the first: as much of it as fits.
+    if (notice.text.empty()) notice.text = Shortened(added.front(), room);
+    notice.text += kMore;
   }
   return notice;
 }

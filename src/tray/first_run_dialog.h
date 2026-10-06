@@ -27,7 +27,9 @@ class FirstRunHost {
   virtual const core::Snapshot& snapshot() const = 0;
   virtual void ApplySettings(const core::Settings& settings) = 0;
   virtual void Reimport() = 0;
-  virtual void Restart() = 0;
+  // Starts a new copy and quits. Returns false if it couldn't, once it has
+  // said why: the tray runs on.
+  virtual bool Restart() = 0;
   // Starts OBS from its install (OpenObs).
   virtual Status StartObs(const std::filesystem::path& install_root) = 0;
   // Done was clicked, with Start with Windows as `start_with_windows`.

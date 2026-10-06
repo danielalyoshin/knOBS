@@ -64,7 +64,7 @@ struct FakeScript {
 
 struct FakeScenario {
   std::string_view name;
-  std::string_view description;
+  std::string description;
   void (*setup)(FakeWorld& world, FakeScript& script);
 };
 

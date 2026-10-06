@@ -15,8 +15,8 @@
 
 #include "app_info.h"
 #include "runtime/obs_install.h"
+#include "tray/message_dialog.h"
 #include "tray/open_obs.h"
-#include "tray/resource.h"
 #include "tray/settings_file.h"
 #include "util/win_strings.h"
 #include "version.h"
@@ -30,6 +30,8 @@ constexpr UINT kSnapshotMessage = WM_APP + 2;  // OnSnapshot left one in pending
 constexpr UINT kActivateMessage = WM_APP + 3;  // Another copy was started (ActivateTray).
 constexpr UINT kFirstRunMessage = WM_APP + 4;  // Open the unfinished first run.
 constexpr UINT_PTR kNoticeTimer = 1;           // Notifier::NextDeadline.
+constexpr UINT_PTR kRestartTimer = 2;          // RestartByItself, while a window is open.
+constexpr UINT kRestartRetryMs = 1000;
 
 using Clock = Notifier::Clock;
 
@@ -62,12 +64,6 @@ HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
   return menu;
 }
 
-HICON LoadAppIcon(HINSTANCE instance, int size) {
-  HICON icon = nullptr;
-  if (FAILED(LoadIconMetric(instance, MAKEINTRESOURCEW(IDI_KNOBS), size, &icon))) return nullptr;
-  return icon;
-}
-
 // Copies `text` into a NOTIFYICONDATAW field, shortened with "…" to fit.
 template <size_t N>
 void CopyField(wchar_t (&field)[N], std::string_view text) {
@@ -78,28 +74,6 @@ void CopyField(wchar_t (&field)[N], std::string_view text) {
   }
   wide.copy(field, wide.size());
   field[wide.size()] = L'\0';
-}
-
-// A task dialog with a Close button, owned by nobody so that it gets a
-// taskbar button and can't hide behind other windows unseen.
-void ShowDialog(HINSTANCE instance, PCWSTR icon, HICON custom_icon, const std::wstring& instruction,
-                const std::wstring& content, const std::wstring& footer = {}) {
-  const std::wstring title(kDisplayNameW);
-  TASKDIALOGCONFIG config = {sizeof(config)};
-  config.hInstance = instance;
-  config.dwFlags = TDF_ALLOW_DIALOG_CANCELLATION;
-  config.dwCommonButtons = TDCBF_CLOSE_BUTTON;
-  config.pszWindowTitle = title.c_str();
-  if (custom_icon) {
-    config.dwFlags |= TDF_USE_HICON_MAIN;
-    config.hMainIcon = custom_icon;
-  } else {
-    config.pszMainIcon = icon;
-  }
-  if (!instruction.empty()) config.pszMainInstruction = instruction.c_str();
-  if (!content.empty()) config.pszContent = content.c_str();
-  if (!footer.empty()) config.pszFooter = footer.c_str();
-  TaskDialogIndirect(&config, nullptr, nullptr, nullptr);
 }
 
 }  // namespace
@@ -256,6 +230,11 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       return 0;
     }
     case WM_TIMER:
+      if (wparam == kRestartTimer) {
+        KillTimer(window_, kRestartTimer);
+        RestartByItself();
+        return 0;
+      }
       if (wparam != kNoticeTimer) break;
       KillTimer(window_, kNoticeTimer);
       Notify(notifier_.Tick(Quiet(), Clock::now()));
@@ -415,11 +394,16 @@ bool TrayApp::RestartByItself() {
     restart_tried_ = false;
     return false;
   }
-  if (restart_tried_ || in_menu_ || quitting_ || OpenDialog()) return false;
-  // Once: if it fails, the menu and the first run offer it.
-  restart_tried_ = true;
-  Restart();
-  return quitting_;
+  if (restart_tried_ || quitting_) return false;
+  // The menu and the first run try again as they close.
+  if (in_menu_ || first_run_dialog_) return false;
+  if (OpenDialog()) {
+    // Other windows, such as an error or a folder picker, don't say when
+    // they close.
+    SetTimer(window_, kRestartTimer, kRestartRetryMs, nullptr);
+    return false;
+  }
+  return Restart();
 }
 
 POINT TrayApp::IconPoint() const {
@@ -602,28 +586,33 @@ void TrayApp::OpenLogFolder() {
   if (opened <= 32) ShowError(std::format("Couldn't open the log folder, {}.", ToUtf8(options_.log_folder)));
 }
 
-void TrayApp::Restart() {
-  if (!options_.restart) return;
+bool TrayApp::Restart() {
+  // Once by itself: if it fails, the menu and the first run offer it.
+  restart_tried_ = true;
+  if (!options_.restart) return false;
   if (const Status started = options_.restart(snapshot_.restart); !started) {
     ShowError(started.error());
-    return;
+    return false;
   }
   Quit();
+  return true;
 }
 
 void TrayApp::ShowAbout() {
   const HICON icon = LoadAppIcon(options_.instance, LIM_LARGE);
-  ShowDialog(options_.instance, nullptr, icon, std::format(L"{} {}", kDisplayNameW, L"" KNOBS_VERSION),
-             std::format(L"Your OBS mic chain, without OBS. {0} runs the filters from your own OBS Studio "
-                         L"install and sends your mic to a virtual cable.\n\n{0} isn't affiliated with or endorsed "
-                         L"by the OBS Project.",
-                         kDisplayNameW),
-             L"Free software under the GNU General Public License, version 2 or later.");
+  ShowMessageDialog(options_.instance,
+                    {.custom_icon = icon,
+                     .instruction = std::format(L"{} {}", kDisplayNameW, L"" KNOBS_VERSION),
+                     .content = std::format(L"Your OBS mic chain, without OBS. {0} runs the filters from your own "
+                                            L"OBS Studio install and sends your mic to a virtual cable.\n\n{0} "
+                                            L"isn't affiliated with or endorsed by the OBS Project.",
+                                            kDisplayNameW),
+                     .footer = L"Free software under the GNU General Public License, version 2 or later."});
   if (icon) DestroyIcon(icon);
 }
 
 void TrayApp::ShowError(std::string_view text) {
-  ShowDialog(options_.instance, TD_WARNING_ICON, nullptr, L"", FromUtf8(text));
+  ShowMessageDialog(options_.instance, {.icon = TD_WARNING_ICON, .content = FromUtf8(text)});
 }
 
 HWND TrayApp::OpenDialog() const {
@@ -654,7 +643,7 @@ bool ActivateTray(const std::wstring& window_class) {
 }
 
 void ShowStartupError(std::string_view text) {
-  ShowDialog(GetModuleHandleW(nullptr), TD_ERROR_ICON, nullptr, L"", FromUtf8(text));
+  ShowMessageDialog(GetModuleHandleW(nullptr), {.icon = TD_ERROR_ICON, .content = FromUtf8(text)});
 }
 
 }  // namespace knobs::tray
