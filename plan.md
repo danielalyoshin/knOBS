@@ -430,7 +430,7 @@ Checked against libobs's monitor (`audio-monitoring/win32/wasapi-output.c`), `ob
 
 **M4 — Ship**
 - [ ] Packaging: small exe (no bundled libobs); simple installer or portable zip
-- [ ] README with the pitch ("close OBS, keep your mic"), setup guide, VB-Cable pointer, "requires OBS Studio installed" + supported version range. The first run links to the setup guide as the README's `#setup` anchor (`kSetupGuideUrl`).
+- [ ] README with the pitch ("close OBS, keep your mic"), setup guide, VB-Cable pointer, "requires OBS Studio installed" + supported version range. The first run links to the setup guide as the README's `#setup` anchor (`kSetupGuideUrl`). Written 2026-10-06, apart from the download: until packaging lands, Setup builds knobs from source.
 - [ ] GPL-2.0-or-later compliance (links libobs): publish source, include license texts
 - [ ] AI-use disclaimer in the forum post (required by the OBS Forum Resource and IP Policy)
 - [ ] Post to OBS forums / r/obs — this is where the users who asked for this live
