@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "audio/audio_devices.h"
 
+#include <algorithm>
 #include <format>
 
 #include "util/win_strings.h"
@@ -13,6 +14,14 @@ constexpr char kMicSourceId[] = "wasapi_input_capture";
 constexpr char kDeviceIdProperty[] = "device_id";
 
 }  // namespace
+
+bool SameId(std::string_view a, std::string_view b) { return AsciiLower(a) == AsciiLower(b); }
+
+const AudioDevice* FindById(const std::vector<AudioDevice>& devices, std::string_view id) {
+  const auto found =
+      std::find_if(devices.begin(), devices.end(), [&](const AudioDevice& device) { return SameId(device.id, id); });
+  return found == devices.end() ? nullptr : &*found;
+}
 
 std::vector<AudioDevice> ListMicDevices(const runtime::ObsApi& api) {
   std::vector<AudioDevice> devices;
@@ -44,9 +53,7 @@ std::vector<AudioDevice> ListMonitoringDevices(const runtime::ObsApi& api) {
 
 Result<AudioDevice> FindDevice(const std::vector<AudioDevice>& devices, std::string_view query,
                                std::string_view kind) {
-  for (const AudioDevice& device : devices) {
-    if (device.id == query) return device;
-  }
+  if (const AudioDevice* device = FindById(devices, query)) return *device;
   const std::string needle = AsciiLower(query);
   std::vector<const AudioDevice*> matches;
   for (const AudioDevice& device : devices) {

@@ -29,13 +29,18 @@ constexpr std::string_view kCompressorId = "compressor_filter";
 constexpr std::string_view kGainId = "gain_filter";
 // What ImportedMic::chain_key leaves out of a saved source (obs.c,
 // obs_save_source).
-constexpr std::array<const char*, 16> kKeysTheCableIgnores = {
+constexpr std::array<const char*, 17> kKeysTheCableIgnores = {
     // The monitor ignores these (M1 findings), in OBS too.
     "muted", "push-to-mute", "push-to-mute-delay", "push-to-talk", "push-to-talk-delay", "enabled", "sync",
     // knobs sets these itself.
     "monitoring_type", "monitoring_enabled", "hotkeys",
     // The output mix, video, and OBS's own bookkeeping.
-    "mixers", "deinterlace_mode", "deinterlace_field_order", "uuid", "canvas_uuid", "private_settings"};
+    "mixers", "deinterlace_mode", "deinterlace_field_order", "uuid", "canvas_uuid", "private_settings",
+    // Only libobs's log uses it.
+    "name"};
+// What it leaves out of each filter: the same name and UUID. A filter's
+// "enabled" stays, since it turns the filter off.
+constexpr std::array<const char*, 2> kFilterKeysTheCableIgnores = {"name", "uuid"};
 
 struct DataReleaser {
   const runtime::ObsApi* api;
@@ -379,6 +384,12 @@ Result<ImportedMic> SceneCollection::Import(const MicCandidate& mic) const {
   if (!json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
   imported.source_json = json;
   for (const char* key : kKeysTheCableIgnores) api_.obs_data_erase(source.get(), key);
+  ArrayPtr key_filters = Own(api_, api_.obs_data_get_array(source.get(), "filters"));
+  const size_t key_filter_count = key_filters ? api_.obs_data_array_count(key_filters.get()) : 0;
+  for (size_t i = 0; i < key_filter_count; ++i) {
+    DataPtr filter = Own(api_, api_.obs_data_array_item(key_filters.get(), i));
+    for (const char* key : kFilterKeysTheCableIgnores) api_.obs_data_erase(filter.get(), key);
+  }
   const char* key_json = api_.obs_data_get_json(source.get());
   if (!key_json) return Error{std::format("libobs couldn't save the mic at {}.", mic.location)};
   imported.chain_key = key_json;

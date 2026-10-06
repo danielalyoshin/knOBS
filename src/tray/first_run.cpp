@@ -23,8 +23,9 @@ constexpr std::string_view kObsDownloadUrl = "https://obsproject.com/download";
 constexpr std::string_view kObsReleasesUrl = "https://github.com/obsproject/obs-studio/releases";
 constexpr std::string_view kVbCableUrl = "https://vb-audio.com/Cable/";
 
-// win-wasapi's and OBS's name for the default device.
-constexpr std::string_view kDefaultDevice = "default";
+using audio::FindById;
+using audio::kDefaultDevice;
+using audio::SameId;
 
 constexpr std::array<std::pair<Page, std::string_view>, 12> kPageNames = {{
     {Page::kWelcome, "welcome"},
@@ -40,15 +41,6 @@ constexpr std::array<std::pair<Page, std::string_view>, 12> kPageNames = {{
     {Page::kWarnings, "warnings"},
     {Page::kDone, "done"},
 }};
-
-// Endpoint IDs, which may differ in case between OBS's settings and Windows.
-bool SameId(std::string_view a, std::string_view b) { return AsciiLower(a) == AsciiLower(b); }
-
-const audio::AudioDevice* FindById(const std::vector<audio::AudioDevice>& devices, std::string_view id) {
-  const auto found = std::find_if(devices.begin(), devices.end(),
-                                  [&](const audio::AudioDevice& device) { return SameId(device.id, id); });
-  return found == devices.end() ? nullptr : &*found;
-}
 
 std::string Count(size_t count, std::string_view thing) {
   return std::format("{} {}{}", count, thing, count == 1 ? "" : "s");

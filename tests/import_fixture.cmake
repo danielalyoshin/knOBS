@@ -2,9 +2,11 @@
 #
 # Runs knobs-import against tests/fixtures/obs-config, a made-up OBS settings
 # folder, and checks what it reports. Needs OBS installed; prints SKIP when
-# it isn't, which the test's SKIP_REGULAR_EXPRESSION turns into a skip.
+# it isn't, which the test's SKIP_REGULAR_EXPRESSION turns into a skip. WORK
+# is a folder it may replace, for an edited copy of the fixture.
 #
-#   cmake -DTOOL=<knobs-import.exe> -DCONFIG=<tests/fixtures/obs-config> -P import_fixture.cmake
+#   cmake -DTOOL=<knobs-import.exe> -DCONFIG=<tests/fixtures/obs-config> -DWORK=<folder>
+#         -P import_fixture.cmake
 
 function(run_import out_var code_var)
   execute_process(
@@ -87,3 +89,38 @@ expect("${output}" "[ok  ] pre-flight         nothing to report")
 expect("${output}" "balance 0.50, Mono on, then 2 filter(s), then volume 1.00")
 expect("${output}" "1. noise_suppress_filter_v2 \"Noise Suppression\"")
 expect("${output}" "libobs loaded the chain; 0 warning(s)")
+string(REGEX MATCH "chain key +[0-9a-f]+" key "${output}")
+if(NOT key)
+  message(FATAL_ERROR "Expected a chain key in:\n${output}")
+endif()
+
+# Names and filter UUIDs don't change what reaches the cable, so renaming the
+# mic and a filter, or adding the filter again, leaves the chain key as it
+# was. A setting changes it.
+file(REMOVE_RECURSE "${WORK}")
+file(COPY "${CONFIG}/" DESTINATION "${WORK}")
+set(scenes "${WORK}/obs-studio/basic/scenes/Main_Scenes.json")
+file(READ "${scenes}" json)
+string(REPLACE "\"name\": \"Mic/Aux\"" "\"name\": \"Mic\"" json "${json}")
+string(REPLACE "\"name\": \"Gain\"" "\"name\": \"Boost\"" json "${json}")
+string(REPLACE "a5d0c3a4-3f7e-4a43-9f0a-000000000004" "a5d0c3a4-3f7e-4a43-9f0a-0000000000f4" json "${json}")
+file(WRITE "${scenes}" "${json}")
+# From here on, import from the copy.
+set(CONFIG "${WORK}")
+run_import(output code --pick 1)
+message("${output}")
+if(NOT code EQUAL 0)
+  message(FATAL_ERROR "Importing the renamed \"Mic\" failed.")
+endif()
+expect("${output}" "1. \"Mic\" (AuxAudioDevice1, monitored)")
+expect("${output}" "2. gain_filter \"Boost\"")
+expect("${output}" "${key}")
+
+string(REPLACE "\"db\": 3.0" "\"db\": 4.0" json "${json}")
+file(WRITE "${scenes}" "${json}")
+run_import(output code --pick 1)
+message("${output}")
+if(NOT code EQUAL 0)
+  message(FATAL_ERROR "Importing \"Mic\" with a new gain failed.")
+endif()
+expect_not("${output}" "${key}")

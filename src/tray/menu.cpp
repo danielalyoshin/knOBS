@@ -18,11 +18,8 @@ using core::State;
 constexpr size_t kMaxMics = kIdCableFirst - kIdMicFirst;
 constexpr size_t kMaxCables = kIdCableLast - kIdCableFirst + 1;
 
-// win-wasapi's and OBS's name for the default device.
-constexpr std::string_view kDefaultDevice = "default";
-
-// Endpoint IDs, which may differ in case between OBS's settings and Windows.
-bool SameId(std::string_view a, std::string_view b) { return AsciiLower(a) == AsciiLower(b); }
+using audio::kDefaultDevice;
+using audio::SameId;
 
 // Menu text for a name: '&' marks a mnemonic, so a literal one is doubled.
 std::string Escape(std::string_view text) {

@@ -631,6 +631,10 @@ TEST(FindDeviceByIdOrName) {
   CHECK(audio::FindDevice(devices, "default", "mic")->name == "Default");
   CHECK(audio::FindDevice(devices, "cable input", "output")->id == "{c}");
   CHECK(audio::FindDevice(devices, "analogue", "mic")->id == "{a}");
+  // IDs may differ in case between OBS's settings and Windows.
+  CHECK(audio::FindDevice(devices, "{B}", "mic").ok() && audio::FindDevice(devices, "{B}", "mic")->id == "{b}");
+  CHECK(audio::SameId("default", "Default") && !audio::SameId("{a}", "{b}"));
+  CHECK(audio::FindById(devices, "{C}") == &devices[3] && !audio::FindById(devices, "CABLE Input"));
 
   const auto ambiguous = audio::FindDevice(devices, "iD4", "mic");
   CHECK(!ambiguous.ok() && ambiguous.error().find("Several") != std::string::npos);

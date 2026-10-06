@@ -449,6 +449,27 @@ TEST(CoreReloadsARunningChainOnlyWhenItChanged) {
   CHECK(f.last().chain_revision == 2 && f.last().chain->cable == "CABLE-A Input (VB-Audio Cable A)");
 }
 
+TEST(CoreKeepsTheChainThroughRenamesAndCaseChanges) {
+  // OBS's profile has the cable's ID in a different case from Windows.
+  Fixture f;
+  f.backend.config.audio.monitoring_device_id = "{0.0.0.00000000}.{CABLE}";
+  f.controller.Start(false, f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
+
+  // Picking that cable in the tray, under Windows' ID, is the same cable.
+  f.controller.Apply({.cable = kCableId, .cable_name = kCableName}, f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1 && f.backend.chain_stops == 0);
+
+  // Renaming the mic or a filter in OBS leaves the key as it was: the names
+  // shown change, and the chain carries on.
+  f.backend.collection[0].mic.name = "Mic";
+  f.backend.collection[0].filters = {"Noise Suppression", "Comp"};
+  f.backend.collection[0].source_json = R"({"key": "chain-1", "name": "Mic"})";
+  f.controller.Reimport(f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1 && f.last().chain_revision == 1);
+  CHECK(f.last().chain->mic == "Mic" && f.last().chain->filters.back() == "Comp" && f.last().mics[0].name == "Mic");
+}
+
 TEST(CoreAsksForARestartToFollowObs) {
   Fixture f;
   f.controller.Start(false, f.now);

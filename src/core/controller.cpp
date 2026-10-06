@@ -11,17 +11,9 @@
 namespace knobs::core {
 namespace {
 
-// win-wasapi's and OBS's name for the default device.
-constexpr std::string_view kDefaultDevice = "default";
-
-// Endpoint IDs, which may differ in case between OBS's settings and Windows.
-bool SameId(std::string_view a, std::string_view b) { return AsciiLower(a) == AsciiLower(b); }
-
-const audio::AudioDevice* FindById(const std::vector<audio::AudioDevice>& devices, std::string_view id) {
-  const auto found = std::find_if(devices.begin(), devices.end(),
-                                  [&](const audio::AudioDevice& device) { return SameId(device.id, id); });
-  return found == devices.end() ? nullptr : &*found;
-}
+using audio::FindById;
+using audio::kDefaultDevice;
+using audio::SameId;
 
 std::string Seconds(Controller::Clock::duration duration) {
   return std::format("{:.3g} s", std::chrono::duration<double>(duration).count());

@@ -45,10 +45,11 @@ struct ChainPlan {
   bool load_callbacks = false;
   audio::AudioDevice cable;
 
-  // The same chain to the same cable. The rest of source_json, and the
-  // cable's name, don't change what reaches the cable.
+  // The same chain to the same cable (audio::SameId). The rest of
+  // source_json, and the cable's name, don't change what reaches the cable.
   bool SameAs(const ChainPlan& other) const {
-    return chain_key == other.chain_key && load_callbacks == other.load_callbacks && cable.id == other.cable.id;
+    return chain_key == other.chain_key && load_callbacks == other.load_callbacks &&
+           audio::SameId(cable.id, other.cable.id);
   }
 };
 

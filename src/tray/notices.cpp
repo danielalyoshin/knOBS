@@ -16,18 +16,15 @@ using core::SetupNeed;
 using core::State;
 using Kind = Notice::Kind;
 
-// win-wasapi's and OBS's name for the default device.
-constexpr std::string_view kDefaultDevice = "default";
+using audio::FindById;
+using audio::kDefaultDevice;
+using audio::SameId;
 
 // What a balloon's text holds, less its terminator (NOTIFYICONDATAW::szInfo).
 constexpr size_t kMaxText = 255;
 
-// Endpoint IDs, which may differ in case between OBS's settings and Windows.
-bool SameId(std::string_view a, std::string_view b) { return AsciiLower(a) == AsciiLower(b); }
-
 bool Connected(const std::vector<audio::AudioDevice>& devices, std::string_view id) {
-  return std::any_of(devices.begin(), devices.end(),
-                     [id](const audio::AudioDevice& device) { return SameId(device.id, id); });
+  return FindById(devices, id) != nullptr;
 }
 
 const import::MicCandidate* PickedMic(const core::Snapshot& snapshot) {

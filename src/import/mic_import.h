@@ -82,9 +82,10 @@ struct ImportedMic {
   // source_json without the keys that don't change what reaches the cable:
   // libobs's monitor ignores mute, push-to-talk and push-to-mute, the
   // source's enabled flag and its sync offset (plan.md, M1 findings), knobs
-  // sets monitoring itself, its private source registers no hotkeys, and the
-  // rest is the output mix, video or OBS's own bookkeeping. Imports with the
-  // same key load the same chain.
+  // sets monitoring itself, its private source registers no hotkeys, the
+  // names of the mic and its filters only label them, and the rest is the
+  // output mix, video or OBS's own bookkeeping, filters' UUIDs included.
+  // Imports with the same key load the same chain.
   std::string chain_key;
 
   // Whether loading should run obs_source_load2 afterwards, as OBS does.

@@ -24,6 +24,7 @@
 #include "common/console.h"
 #include "common/obs_import.h"
 #include "common/push_source.h"
+#include "common/sha256.h"
 #include "util/win_strings.h"
 
 namespace {
@@ -134,6 +135,10 @@ int Run(const Options& options) {
   Check(true, "load",
         std::format("libobs loaded the chain{}; {} warning(s)",
                     imported->load_callbacks() ? " and ran its load callbacks" : "", imported->warning_count()));
+  // What the core compares to tell whether the chain changed in OBS
+  // (ImportedMic::chain_key), hashed.
+  Report(Outcome::kNote, "chain key",
+         Sha256Hex(imported->chain_key.data(), imported->chain_key.size()).substr(0, 16));
   ReportDevices(api, *imported, *config);
 
   if (options.save) {

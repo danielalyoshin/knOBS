@@ -145,6 +145,7 @@ set_tests_properties(smoke harness PROPERTIES SKIP_RETURN_CODE 77)
 add_test(NAME import
   COMMAND ${CMAKE_COMMAND} -DTOOL=$<TARGET_FILE:knobs-import>
           -DCONFIG=${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/obs-config
+          -DWORK=${CMAKE_CURRENT_BINARY_DIR}/import-fixture
           -P ${CMAKE_CURRENT_SOURCE_DIR}/tests/import_fixture.cmake)
 set_tests_properties(import PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP .OBS isn't installed.")
 add_test(NAME core
