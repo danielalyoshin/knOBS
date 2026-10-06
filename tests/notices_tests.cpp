@@ -653,6 +653,27 @@ TEST(NoticesSayKnobsStoppedForAnUnsupportedObs) {
   CHECK(start.events == std::vector<std::string>{"This version of OBS isn't supported"});
   CHECK(start.last.text ==
         std::format("{} doesn't support OBS 33.0.0 yet, so it stopped. Click for what you can do.", kDisplayName));
+
+  // Too old, at start and when OBS changes to it: not "yet", since no update
+  // will support it.
+  FakeWorld old_world = tools::DefaultWorld();
+  old_world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {31, 1, 4}},
+                   runtime::UnsupportedObsMessage("31.1.4")};
+  Fixture old(old_world);
+  old.Start();
+  CHECK(old.events == std::vector<std::string>{"This version of OBS isn't supported"});
+  CHECK(old.last.text ==
+        std::format("OBS 31.1.4 is too old for {}, so it stopped. Click for what you can do.", kDisplayName));
+  Fixture changed;
+  changed.Start();
+  changed.ObsOpens();
+  changed.ObsCloses([](FakeWorld& world) {
+    world.obs = {core::ObsFound::kUnsupported, {world.obs.install.root, {31, 1, 4}},
+                 runtime::UnsupportedObsMessage("31.1.4")};
+  });
+  CHECK(changed.events == std::vector<std::string>{"OBS changed to 31.1.4"});
+  CHECK(changed.last.text ==
+        std::format("It's too old for {0}, so {0} stopped. Click for what you can do.", kDisplayName));
 }
 
 // --- Other problems -----------------------------------------------------------------

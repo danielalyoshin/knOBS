@@ -32,6 +32,10 @@ inline constexpr ObsVersion kFirstUnsupportedObs{33, 0, 0};
 
 bool IsSupportedObsVersion(const ObsVersion& version);
 
+// An unsupported OBS that's newer than knobs supports, which a knobs update
+// can support, rather than one that's too old.
+inline bool IsNewerThanSupportedObs(const ObsVersion& version) { return version >= kFirstUnsupportedObs; }
+
 // For messages, e.g. "OBS Studio 32.2 or a later 32.x release".
 std::string DescribeSupportedObsVersions();
 

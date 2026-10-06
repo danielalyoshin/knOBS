@@ -164,6 +164,10 @@ std::string ObsUserNote(const core::Snapshot& snapshot) {
       return std::format("Can't find OBS Studio. If it's installed somewhere else, you can show {} where.",
                          kDisplayName);
     case State::kObsUnsupported:
+      if (!runtime::IsNewerThanSupportedObs(snapshot.obs.version)) {
+        return std::format("OBS {} is installed, which is too old for {}.", snapshot.obs.version.ToString(),
+                           kDisplayName);
+      }
       return std::format("OBS {} is installed, and {} doesn't support it yet.", snapshot.obs.version.ToString(),
                          kDisplayName);
     case State::kNeedsSetup:
@@ -240,10 +244,13 @@ PageView Steps(const core::Snapshot& snapshot) {
     open = std::format("Install {} from <a href=\"{}\">obsproject.com</a>, and open it.",
                        runtime::DescribeSupportedObsVersions(), kObsDownloadUrl);
   } else if (snapshot.state == State::kObsUnsupported) {
-    open = std::format("Install {} from <a href=\"{}\">OBS's releases on GitHub</a>, and open it. {} doesn't "
-                       "support OBS {} yet.",
-                       runtime::DescribeSupportedObsVersions(), kObsReleasesUrl, kDisplayName,
-                       snapshot.obs.version.ToString());
+    const std::string why = runtime::IsNewerThanSupportedObs(snapshot.obs.version)
+                                ? std::format("{} doesn't support OBS {} yet.", kDisplayName,
+                                              snapshot.obs.version.ToString())
+                                : std::format("OBS {} is too old for {}.", snapshot.obs.version.ToString(),
+                                              kDisplayName);
+    open = std::format("Install {} from <a href=\"{}\">OBS's releases on GitHub</a>, and open it. {}",
+                       runtime::DescribeSupportedObsVersions(), kObsReleasesUrl, why);
   } else {
     open = "Open OBS.";
   }
@@ -315,7 +322,7 @@ PageView ObsUnsupported(const core::Snapshot& snapshot) {
   view.instruction = "This version of OBS isn't supported";
   const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
   // Only an OBS newer than knobs supports can be waited for.
-  const std::string wait = snapshot.obs.version >= runtime::kFirstUnsupportedObs
+  const std::string wait = runtime::IsNewerThanSupportedObs(snapshot.obs.version)
                                ? std::format(" Or wait for a {} update that supports OBS {}.", kDisplayName,
                                              snapshot.obs.version.ToString())
                                : "";

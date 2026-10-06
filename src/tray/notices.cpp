@@ -111,14 +111,21 @@ std::optional<Notice> ProblemNotice(const core::Snapshot& snapshot, const runtim
       const std::string version = snapshot.obs.version.ToString();
       notice.kind = Kind::kObsUnsupported;
       notice.page = FirstRunPage::kObsUnsupported;
+      // Only an OBS newer than knobs supports is "not yet" supported.
+      const bool newer = runtime::IsNewerThanSupportedObs(snapshot.obs.version);
       if (before != runtime::ObsVersion{} && before != snapshot.obs.version) {
-        notice.title = std::format("OBS was updated to {}", version);
-        notice.text = std::format("{} doesn't support it yet, so it stopped. Click for what you can do.",
-                                  kDisplayName);
+        notice.title = before < snapshot.obs.version ? std::format("OBS was updated to {}", version)
+                                                     : std::format("OBS changed to {}", version);
+        notice.text = newer ? std::format("{} doesn't support it yet, so it stopped. Click for what you can do.",
+                                          kDisplayName)
+                            : std::format("It's too old for {}, so {} stopped. Click for what you can do.",
+                                          kDisplayName, kDisplayName);
       } else {
         notice.title = "This version of OBS isn't supported";
-        notice.text = std::format("{} doesn't support OBS {} yet, so it stopped. Click for what you can do.",
-                                  kDisplayName, version);
+        notice.text = newer ? std::format("{} doesn't support OBS {} yet, so it stopped. Click for what you can do.",
+                                          kDisplayName, version)
+                            : std::format("OBS {} is too old for {}, so it stopped. Click for what you can do.",
+                                          version, kDisplayName);
       }
       return notice;
     }

@@ -126,6 +126,11 @@ TEST(WelcomeSaysWhatWasFound) {
   unsupported.obs = {"C:\\Program Files\\obs-studio", {33, 0, 0}};
   CHECK(Contains(notes(unsupported), "\nOBS 33.0.0 is installed, and "));
   CHECK(notes(unsupported).ends_with("| obs"));
+  // Too old: no update will fix it, so not "yet".
+  core::Snapshot too_old = unsupported;
+  too_old.obs.version = {31, 1, 4};
+  CHECK(Contains(notes(too_old), std::format("\nOBS 31.1.4 is installed, which is too old for {}.", kDisplayName)));
+  CHECK(!Contains(notes(too_old), "yet"));
   core::Snapshot settings = missing;
   settings.state = State::kNeedsSetup;
   settings.setup = SetupNeed::kObsSettings;
@@ -595,6 +600,10 @@ TEST(SecondDoorWithoutOBSOrAMic) {
   view = FirstRun({}, Page::kSteps).View(unsupported);
   CHECK(Contains(view.content, "OBS's releases on GitHub</a>, and open it."));
   CHECK(Contains(view.content, " doesn't support OBS 33.0.0 yet."));
+  unsupported.obs.version = {31, 1, 4};
+  view = FirstRun({}, Page::kSteps).View(unsupported);
+  CHECK(Contains(view.content, std::format("and open it. OBS 31.1.4 is too old for {}.", kDisplayName)));
+  CHECK(!Contains(view.content, "yet"));
 
   // Several mics, none picked: whichever one they mean.
   CHECK(Contains(FirstRun({}, Page::kSteps).View(PickMic()).content, "click your mic and choose Filters"));
