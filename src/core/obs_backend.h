@@ -40,7 +40,7 @@ struct ObsBackendOptions {
 class ObsBackend : public Backend {
  public:
   explicit ObsBackend(ObsBackendOptions options);
-  // Waits for pruning to finish, stops the chain and shuts libobs down.
+  // Stops pruning, stops the chain and shuts libobs down.
   ~ObsBackend() override;
 
   ObsCheck CheckObs(const Settings& settings) override;
@@ -68,8 +68,9 @@ class ObsBackend : public Backend {
   std::unique_ptr<audio::LiveChain> chain_;
   std::atomic<uint64_t> packets_ = 0;
   // Prunes runtime copies, writing to host_'s log. Only the file system and
-  // the log, which is thread-safe.
-  std::thread pruner_;
+  // the log, which is thread-safe. Stopped and joined first thing in the
+  // destructor.
+  std::jthread pruner_;
 };
 
 }  // namespace knobs::core

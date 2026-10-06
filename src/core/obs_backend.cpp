@@ -55,6 +55,9 @@ void LogPruned(const runtime::PrunedCopies& pruned, runtime::ObsLog& log) {
   for (const runtime::PrunedCopies::Left& left : pruned.left) {
     log.Write(LOG_INFO, std::format("Left {} for next time: {}", ToUtf8(left.folder), left.why));
   }
+  if (pruned.stopped) {
+    log.Write(LOG_INFO, "Stopped removing old OBS runtime copies to shut down, so the rest stay until next time.");
+  }
 }
 
 }  // namespace
@@ -62,7 +65,9 @@ void LogPruned(const runtime::PrunedCopies& pruned, runtime::ObsLog& log) {
 ObsBackend::ObsBackend(ObsBackendOptions options) : options_(std::move(options)) {}
 
 ObsBackend::~ObsBackend() {
-  // It writes to host_'s log.
+  // It writes to host_'s log. Asked to stop, it stops once it's done with the
+  // file it's on, so quitting doesn't wait for the rest.
+  pruner_.request_stop();
   if (pruner_.joinable()) pruner_.join();
   StopChain();
   if (!host_) return;
@@ -117,8 +122,10 @@ Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import:
   if (options_.prune_runtime) {
     // Now the copy in use is known and loaded. Off the core's thread, so the
     // chain doesn't wait for 50 MB of deletes.
-    pruner_ = std::thread([base = host_->app_dirs().RuntimeBase(), keep = host_->copy().root, &log = host_->log()] {
-      LogPruned(runtime::PruneRuntimeCopies(base, keep), log);
+    pruner_ = std::jthread([base = host_->app_dirs().RuntimeBase(), keep = host_->copy().root,
+                            &log = host_->log()](std::stop_token stop) {
+      const runtime::PruneOptions options{.stop_requested = [&stop] { return stop.stop_requested(); }};
+      LogPruned(runtime::PruneRuntimeCopies(base, keep, options), log);
     });
   }
   return Ok{};

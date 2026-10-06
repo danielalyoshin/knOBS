@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -36,6 +37,11 @@ struct RuntimeCopy {
   uint64_t total_bytes = 0;
 };
 
+// The mutex RuntimeCopyLock takes unless it's given another: the one every
+// knobs process in this logon session shares. Tests take one of their own,
+// so that they neither hold up a knobs that's running nor find it busy.
+std::wstring RuntimeCopyLockName();
+
 // Serializes making, loading and pruning runtime copies across the processes
 // in this logon session. Hold it from EnsureRuntimeCopy until obs.dll has
 // loaded from the copy, so another process pruning copies can't remove it in
@@ -45,7 +51,7 @@ class RuntimeCopyLock {
   // Waits for the lock, or with `wait` false, takes it only if it's free.
   // Best effort: without the mutex, a single process still works, so only
   // pruning checks locked().
-  explicit RuntimeCopyLock(bool wait = true);
+  explicit RuntimeCopyLock(bool wait = true, const std::wstring& name = RuntimeCopyLockName());
   ~RuntimeCopyLock();
   RuntimeCopyLock(const RuntimeCopyLock&) = delete;
   RuntimeCopyLock& operator=(const RuntimeCopyLock&) = delete;
@@ -81,6 +87,17 @@ struct PrunedCopies {
   // Another process was making or loading a copy (it held the
   // RuntimeCopyLock), so nothing was looked at.
   bool busy = false;
+  // Asked to stop (PruneOptions::stop_requested), pruning stopped before it
+  // got to every folder. Those it didn't get to aren't in `left`.
+  bool stopped = false;
+};
+
+struct PruneOptions {
+  // The RuntimeCopyLock to take.
+  std::wstring lock = RuntimeCopyLockName();
+  // Asked before each folder and each file, and while waiting to set a
+  // folder aside. Once it says true, pruning stops within a file's work.
+  std::function<bool()> stop_requested;
 };
 
 // Removes from runtime_base what knobs no longer needs: copies of OBS other
@@ -95,8 +112,10 @@ struct PrunedCopies {
 // makes the copy's bin\64bit the working directory). A loaded DLL doesn't stop
 // the rename, so DLLs are checked first: Windows won't open a loaded one for
 // writing. Doesn't wait for the RuntimeCopyLock: while another process holds
-// it, nothing is pruned.
+// it, nothing is pruned. Asked to stop, it leaves the folder it was on whole
+// under its own name or, if that was already set aside, part deleted under
+// its .old-<n> name, which the next prune finishes.
 PrunedCopies PruneRuntimeCopies(const std::filesystem::path& runtime_base,
-                                const std::filesystem::path& keep);
+                                const std::filesystem::path& keep, const PruneOptions& options = {});
 
 }  // namespace knobs::runtime

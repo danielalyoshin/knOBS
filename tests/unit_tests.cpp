@@ -20,6 +20,7 @@
 #include <thread>
 #include <vector>
 
+#include "app_info.h"
 #include "audio/audio_devices.h"
 #include "audio/live_chain.h"
 #include "common/audio_diff.h"
@@ -289,6 +290,20 @@ bool IsWhole(const fs::path& copy) {
          fs::exists(copy / L"data" / L"libobs" / L"default.effect") && fs::exists(copy / L"knobs-runtime.txt");
 }
 
+size_t CountFiles(const fs::path& dir) {
+  size_t files = 0;
+  std::error_code ec;
+  for (auto it = fs::recursive_directory_iterator(dir, ec); !ec && it != fs::recursive_directory_iterator();
+       it.increment(ec)) {
+    files += it->is_regular_file(ec);
+  }
+  return files;
+}
+
+// A RuntimeCopyLock of this run's own, so that the tests neither hold up a
+// knobs that's running nor find it busy, and no other run of the tests does.
+std::wstring TestCopyLock() { return std::format(L"Local\\knobs-tests-{}-runtime-copy", GetCurrentProcessId()); }
+
 // A directory junction at `link` to `target`. Unlike a symbolic link, it
 // needs no privilege. Its reparse data is REPARSE_DATA_BUFFER's mount point
 // form (ntifs.h): the header, then the four name offsets and lengths, then
@@ -336,8 +351,8 @@ TEST(PruneRemovesOldCopiesAndLeftovers) {
   // The copier never leaves a file read-only, but one still goes.
   SetFileAttributesW((base / L"32.2.0" / L"bin" / L"64bit" / L"obs.dll").c_str(), FILE_ATTRIBUTE_READONLY);
 
-  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
-  CHECK(!pruned.busy);
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
+  CHECK(!pruned.busy && !pruned.stopped);
   CHECK(pruned.left.empty());
   CHECK(pruned.removed.size() == 5);
   CHECK(ContainsPath(pruned.removed, base / L"32.2.3.partial"));
@@ -345,8 +360,14 @@ TEST(PruneRemovesOldCopiesAndLeftovers) {
   CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
   CHECK(IsWhole(keep));
 
-  const PrunedCopies again = PruneRuntimeCopies(base, keep);
+  const PrunedCopies again = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
   CHECK(again.removed.empty() && again.left.empty() && IsWhole(keep));
+}
+
+TEST(PruneTakesTheSessionsCopyLockByDefault) {
+  CHECK(RuntimeCopyLockName() == std::format(L"Local\\{}-runtime-copy", kDisplayNameW));
+  CHECK(PruneOptions{}.lock == RuntimeCopyLockName());
+  CHECK(!PruneOptions{}.stop_requested);
 }
 
 TEST(PruneLeavesCopiesInUseForLater) {
@@ -374,7 +395,9 @@ TEST(PruneLeavesCopiesInUseForLater) {
   fs::current_path(working / L"bin" / L"64bit", ec);
   CHECK(!ec);
 
-  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  const auto start = std::chrono::steady_clock::now();
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
+  const auto took = std::chrono::steady_clock::now() - start;
   fs::current_path(before, ec);
   CHECK(!pruned.busy);
   CHECK(pruned.removed.empty());
@@ -385,13 +408,98 @@ TEST(PruneLeavesCopiesInUseForLater) {
   // Each stays whole, under its own name.
   CHECK(Names(base) == (std::vector<std::wstring>{L"32.2.0", L"32.2.1", L"32.2.2", L"32.2.3"}));
   CHECK(IsWhole(loaded) && fs::exists(dll) && IsWhole(open) && IsWhole(working) && IsWhole(keep));
+  // Setting each of two aside is tried for about a second, and no longer.
+  CHECK(took < std::chrono::seconds(4));
 
   // Next time, once nothing uses them, they go.
   if (module) FreeLibrary(module);
   if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
-  const PrunedCopies later = PruneRuntimeCopies(base, keep);
+  const PrunedCopies later = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
   CHECK(later.left.empty() && later.removed.size() == 3);
   CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
+}
+
+TEST(PruneWaitsAMomentForAFileToClose) {
+  TempDir dir(L"prune-moment");
+  const fs::path base = dir.path / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  const fs::path old = MakeCopy(base / L"32.2.1");
+  // Antivirus looking at a file for a moment: it's open without
+  // FILE_SHARE_DELETE, which stops the folder from being renamed, for 250 ms.
+  const HANDLE file = CreateFileW((old / L"data" / L"libobs" / L"default.effect").c_str(), GENERIC_READ,
+                                  FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  CHECK(file != INVALID_HANDLE_VALUE);
+  std::thread scanner([file] {
+    Sleep(250);
+    if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  });
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
+  scanner.join();
+  CHECK(pruned.left.empty());
+  CHECK(pruned.removed == std::vector<fs::path>{old});
+  CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
+}
+
+TEST(PruneStopsWhenAsked) {
+  TempDir dir(L"prune-stop");
+  const fs::path base = dir.path / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  MakeCopy(base / L"32.2.0");
+  MakeCopy(base / L"32.2.1");
+  const std::vector<std::wstring> all = Names(base);
+
+  // Asked before it starts, it touches nothing.
+  const PrunedCopies early =
+      PruneRuntimeCopies(base, keep, {.lock = TestCopyLock(), .stop_requested = [] { return true; }});
+  CHECK(early.stopped && early.removed.empty() && early.left.empty());
+  CHECK(Names(base) == all);
+  CHECK(IsWhole(base / L"32.2.0") && IsWhole(base / L"32.2.1") && IsWhole(keep));
+
+  // Asked once a file is gone, as knobs quits while it deletes a copy.
+  // Folders are looked at in name order, as NTFS lists them: 32.2.0 first.
+  const size_t files = CountFiles(base);
+  const PrunedCopies pruned = PruneRuntimeCopies(
+      base, keep, {.lock = TestCopyLock(), .stop_requested = [&] { return CountFiles(base) < files; }});
+  CHECK(pruned.stopped && pruned.removed.empty() && pruned.left.size() == 1);
+  // What was deleted came from a copy set aside first. Nothing under a
+  // copy's own name is part deleted, and the next copy wasn't looked at.
+  CHECK(!fs::exists(base / L"32.2.0") && IsWhole(base / L"32.2.1") && IsWhole(keep));
+  if (pruned.left.size() == 1) {
+    const fs::path retired = pruned.left[0].folder;
+    CHECK(retired.parent_path() == base && retired.filename().native().starts_with(L"32.2.0.old-"));
+    CHECK(pruned.left[0].why == "pruning stopped while it was being deleted");
+    CHECK(CountFiles(retired) > 0 && CountFiles(retired) < 3);
+    CHECK(Names(base) == (std::vector<std::wstring>{retired.filename().native(), L"32.2.1", L"32.2.2"}));
+  }
+
+  // The next prune finishes it.
+  const PrunedCopies later = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
+  CHECK(!later.stopped && later.left.empty() && later.removed.size() == 2);
+  CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
+  CHECK(IsWhole(keep));
+}
+
+TEST(PruneStopsWaitingForACopyInUse) {
+  TempDir dir(L"prune-stop-waiting");
+  const fs::path base = dir.path / L"runtime";
+  const fs::path keep = MakeCopy(base / L"32.2.2");
+  const fs::path open = MakeCopy(base / L"32.2.1");
+  const HANDLE file = CreateFileW((open / L"data" / L"libobs" / L"default.effect").c_str(), GENERIC_READ,
+                                  FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  CHECK(file != INVALID_HANDLE_VALUE);
+  // Asked 100 ms in, while it waits to try setting the copy aside again,
+  // which it would for about a second.
+  const auto start = std::chrono::steady_clock::now();
+  const auto asked = [start] { return std::chrono::steady_clock::now() - start > std::chrono::milliseconds(100); };
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock(), .stop_requested = asked});
+  const auto took = std::chrono::steady_clock::now() - start;
+  if (file != INVALID_HANDLE_VALUE) CloseHandle(file);
+  CHECK(took < std::chrono::milliseconds(600));
+  CHECK(pruned.removed.empty() && pruned.left.size() == 1);
+  if (pruned.left.size() == 1) {
+    CHECK(pruned.left[0].folder == open && pruned.left[0].why.starts_with("couldn't set it aside"));
+  }
+  CHECK(IsWhole(open) && IsWhole(keep));
 }
 
 TEST(PruneLeavesEverythingWhileACopyIsMade) {
@@ -405,19 +513,19 @@ TEST(PruneLeavesEverythingWhileACopyIsMade) {
   std::promise<void> locked;
   std::promise<void> copied;
   std::thread copier([&locked, done = copied.get_future()] {
-    const RuntimeCopyLock lock;
+    const RuntimeCopyLock lock(true, TestCopyLock());
     locked.set_value();
     done.wait();
   });
   locked.get_future().wait();
-  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
   copied.set_value();
   copier.join();
   CHECK(pruned.busy);
   CHECK(pruned.removed.empty() && pruned.left.empty());
   CHECK(Names(base) == (std::vector<std::wstring>{L"32.2.1", L"32.2.2", L"32.2.3.partial"}));
 
-  const PrunedCopies after = PruneRuntimeCopies(base, keep);
+  const PrunedCopies after = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
   CHECK(!after.busy && after.removed.size() == 2);
   CHECK(Names(base) == std::vector<std::wstring>{L"32.2.2"});
 }
@@ -446,7 +554,7 @@ TEST(PruneTouchesOnlyItsOwnFolders) {
   CHECK(MakeJunction(base / L"32.2.1" / L"data" / L"elsewhere", elsewhere));
   CHECK(IsWhole(base / L"32.1.0"));
 
-  const PrunedCopies pruned = PruneRuntimeCopies(base, keep);
+  const PrunedCopies pruned = PruneRuntimeCopies(base, keep, {.lock = TestCopyLock()});
   CHECK(pruned.left.empty());
   CHECK(pruned.removed == std::vector<fs::path>{base / L"32.2.1"});
   std::vector<std::wstring> expected = foreign;

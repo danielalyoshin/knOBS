@@ -5,9 +5,11 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <optional>
 #include <set>
@@ -47,6 +49,16 @@ std::string RootsLine() {
 
 int64_t WriteTime(const fs::path& file, std::error_code& ec) {
   return fs::last_write_time(file, ec).time_since_epoch().count();
+}
+
+// The copies are knobs's own. A read-only attribute, such as one carried over
+// from the install, would block flushing a file, deleting it and replacing
+// it, and makes a DLL look loaded to CheckFolder.
+void ClearReadOnly(const fs::path& file) {
+  const DWORD attributes = GetFileAttributesW(file.c_str());
+  if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY)) {
+    SetFileAttributesW(file.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
+  }
 }
 
 // Forces a file's data to disk, so the manifest can't reach the disk before
@@ -217,6 +229,25 @@ fs::path RetiredPath(const fs::path& runtime_base, const std::string& version) {
   }
 }
 
+// Whether pruning has been asked to stop (PruneOptions::stop_requested).
+bool Stopped(const std::function<bool()>& stop_requested) { return stop_requested && stop_requested(); }
+
+// Waits for `time` unless asked to stop first. Returns false if it was.
+bool WaitUnlessStopped(std::chrono::milliseconds time, const std::function<bool()>& stop_requested) {
+  constexpr std::chrono::milliseconds kSlice(10);
+  const auto end = std::chrono::steady_clock::now() + time;
+  while (!Stopped(stop_requested)) {
+    const auto left = std::chrono::ceil<std::chrono::milliseconds>(end - std::chrono::steady_clock::now());
+    if (left <= std::chrono::milliseconds::zero()) return true;
+    Sleep(static_cast<DWORD>(std::min(left, kSlice).count()));
+  }
+  return false;
+}
+
+// How many times setting a folder aside is tried before it's left for next
+// time, waiting 100 ms longer after each try: about a second in all.
+constexpr int kSetAsideAttempts = 5;
+
 struct FolderCheck {
   uint64_t bytes = 0;
   std::string in_use;  // Why the folder can't go now, if it can't.
@@ -225,12 +256,14 @@ struct FolderCheck {
 // Looks through a folder before it's removed: adds up its files, makes them
 // writable, and looks for a DLL a program has loaded from it. A loaded DLL
 // doesn't keep its folder from being renamed, but Windows won't open it for
-// writing, which the check tries without writing anything.
-FolderCheck CheckFolder(const fs::path& folder) {
+// writing, which the check tries without writing anything. Asked to stop, it
+// stops looking, and the caller sees that.
+FolderCheck CheckFolder(const fs::path& folder, const std::function<bool()>& stop_requested) {
   FolderCheck check;
   std::error_code ec;
   for (auto it = fs::recursive_directory_iterator(folder, ec); !ec && it != fs::recursive_directory_iterator();
        it.increment(ec)) {
+    if (Stopped(stop_requested)) return check;
     // Links aren't followed, and only files are looked at.
     const fs::file_type type = it->symlink_status(ec).type();
     if (ec) break;
@@ -238,13 +271,8 @@ FolderCheck CheckFolder(const fs::path& folder) {
     const uintmax_t size = it->file_size(ec);
     if (ec) break;
     check.bytes += size;
-    // The copies are knobs's own, and writable when made. A read-only file
-    // would look loaded, and might not delete.
     const fs::path& file = it->path();
-    const DWORD attributes = GetFileAttributesW(file.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY)) {
-      SetFileAttributesW(file.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
-    }
+    ClearReadOnly(file);
     if (AsciiLower(ToUtf8(file.extension())) != ".dll") continue;
     HANDLE handle = CreateFileW(file.c_str(), FILE_WRITE_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
                                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -259,6 +287,26 @@ FolderCheck CheckFolder(const fs::path& folder) {
   return check;
 }
 
+// Deletes a folder and what's in it, as fs::remove_all does, links included
+// but not followed. Asked to stop, it stops between files. Returns whether
+// the folder is gone; if it isn't and it wasn't asked to stop, `ec` says why.
+bool RemoveAll(const fs::path& folder, const std::function<bool()>& stop_requested, std::error_code& ec) {
+  for (auto it = fs::directory_iterator(folder, ec); !ec && it != fs::directory_iterator(); it.increment(ec)) {
+    if (Stopped(stop_requested)) return false;
+    const fs::file_type type = it->symlink_status(ec).type();
+    if (ec) return false;
+    if (type == fs::file_type::directory) {
+      if (!RemoveAll(it->path(), stop_requested, ec)) return false;
+    } else {
+      fs::remove(it->path(), ec);  // A link goes, not what it leads to.
+      if (ec) return false;
+    }
+  }
+  if (ec) return false;
+  fs::remove(folder, ec);
+  return !ec;
+}
+
 // Removes a runtime copy, or a folder a copy left behind, unless a program
 // uses it. It's renamed aside first, which fails as a whole while a process
 // has a file open in it or works in it, and only what was renamed is
@@ -266,19 +314,32 @@ FolderCheck CheckFolder(const fs::path& folder) {
 // stays, or nothing once it's gone. Call with the RuntimeCopyLock held, so
 // no process is between making a copy and loading it.
 std::optional<PrunedCopies::Left> RemoveCopyFolder(const fs::path& runtime_base, const CopyFolder& folder,
-                                                   uint64_t& bytes) {
-  const FolderCheck check = CheckFolder(folder.path);
+                                                   const std::function<bool()>& stop_requested, uint64_t& bytes) {
+  const FolderCheck check = CheckFolder(folder.path, stop_requested);
   if (!check.in_use.empty()) return PrunedCopies::Left{folder.path, check.in_use};
+  if (Stopped(stop_requested)) return PrunedCopies::Left{folder.path, "pruning stopped before it was set aside"};
   const fs::path retired = RetiredPath(runtime_base, folder.version);
+  // Antivirus and the search indexer briefly hold handles to files, which
+  // makes renaming their folder fail for a moment, as in EnsureRuntimeCopy. A
+  // program that uses the copy holds its handles for longer, so the tries end
+  // after about a second.
   std::error_code ec;
-  fs::rename(folder.path, retired, ec);
+  for (int attempt = 1;; ++attempt) {
+    fs::rename(folder.path, retired, ec);
+    if (!ec || attempt == kSetAsideAttempts ||
+        !WaitUnlessStopped(std::chrono::milliseconds(100 * attempt), stop_requested)) {
+      break;
+    }
+  }
   if (ec) {
     return PrunedCopies::Left{
         folder.path, std::format("couldn't set it aside, so a program may be using it: {}", Describe(ec))};
   }
   // What doesn't go now is a <version>.old-<n> folder, for next time.
-  fs::remove_all(retired, ec);
-  if (ec) return PrunedCopies::Left{retired, std::format("couldn't delete it: {}", Describe(ec))};
+  if (!RemoveAll(retired, stop_requested, ec)) {
+    return PrunedCopies::Left{retired, ec ? std::format("couldn't delete it: {}", Describe(ec))
+                                          : std::string("pruning stopped while it was being deleted")};
+  }
   bytes = check.bytes;
   return std::nullopt;
 }
@@ -289,14 +350,15 @@ void RemoveRetiredCopies(const fs::path& runtime_base, const std::string& versio
   for (const CopyFolder& folder : ListCopyFolders(runtime_base)) {
     if (folder.kind != CopyFolder::kRetired || folder.version != version) continue;
     uint64_t bytes = 0;
-    RemoveCopyFolder(runtime_base, folder, bytes);
+    RemoveCopyFolder(runtime_base, folder, {}, bytes);
   }
 }
 
 }  // namespace
 
-RuntimeCopyLock::RuntimeCopyLock(bool wait) {
-  const std::wstring name = std::format(L"Local\\{}-runtime-copy", kDisplayNameW);
+std::wstring RuntimeCopyLockName() { return std::format(L"Local\\{}-runtime-copy", kDisplayNameW); }
+
+RuntimeCopyLock::RuntimeCopyLock(bool wait, const std::wstring& name) {
   mutex_ = CreateMutexW(nullptr, FALSE, name.c_str());
   if (!mutex_) return;
   const DWORD result = WaitForSingleObject(mutex_, wait ? INFINITE : 0);
@@ -412,12 +474,7 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
     if (ec) {
       return Error{std::format("Couldn't copy {} to {}: {}", ToUtf8(from), ToUtf8(to), Describe(ec))};
     }
-    // The copy is knobs's own; a read-only attribute carried over from the
-    // install would block flushing it now and replacing it later.
-    const DWORD attributes = GetFileAttributesW(to.c_str());
-    if (attributes != INVALID_FILE_ATTRIBUTES && (attributes & FILE_ATTRIBUTE_READONLY)) {
-      SetFileAttributesW(to.c_str(), attributes & ~FILE_ATTRIBUTE_READONLY);
-    }
+    ClearReadOnly(to);
     if (!FlushToDisk(to)) {
       return Error{std::format("Couldn't write {}: {}", ToUtf8(to), DescribeWinError(GetLastError()))};
     }
@@ -457,11 +514,11 @@ Result<RuntimeCopy> EnsureRuntimeCopy(const ObsInstall& install, const fs::path&
   return RuntimeCopy{target, false, file_set->files.size(), file_set->total_bytes};
 }
 
-PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& keep) {
+PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& keep, const PruneOptions& options) {
   PrunedCopies pruned;
   // Held by a process making a copy, which uses its staging folder, or about
   // to load one.
-  const RuntimeCopyLock lock(false);
+  const RuntimeCopyLock lock(false, options.lock);
   if (!lock.locked()) {
     pruned.busy = true;
     return pruned;
@@ -469,8 +526,12 @@ PrunedCopies PruneRuntimeCopies(const fs::path& runtime_base, const fs::path& ke
   const std::string kept = AsciiLower(ToUtf8(keep.filename()));
   for (const CopyFolder& folder : ListCopyFolders(runtime_base)) {
     if (folder.kind == CopyFolder::kCopy && folder.version == kept) continue;
+    if (Stopped(options.stop_requested)) {
+      pruned.stopped = true;
+      break;
+    }
     uint64_t bytes = 0;
-    if (auto left = RemoveCopyFolder(runtime_base, folder, bytes)) {
+    if (auto left = RemoveCopyFolder(runtime_base, folder, options.stop_requested, bytes)) {
       pruned.left.push_back(std::move(*left));
     } else {
       pruned.removed.push_back(folder.path);
