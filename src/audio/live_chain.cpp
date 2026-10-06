@@ -96,6 +96,8 @@ Result<std::unique_ptr<LiveChain>> LiveChain::Start(const runtime::ObsApi& api,
   return chain;
 }
 
+void LiveChain::RestartMonitor() { api_.obs_reset_audio_monitoring(); }
+
 LiveChain::~LiveChain() {
   api_.obs_source_dec_active(source_);
   api_.obs_source_set_monitoring_type(source_, OBS_MONITORING_TYPE_NONE);

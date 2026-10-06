@@ -2,6 +2,7 @@
 #include "core/controller.h"
 
 #include <algorithm>
+#include <cmath>
 #include <format>
 #include <utility>
 
@@ -16,6 +17,27 @@ using audio::SameId;
 
 std::string Seconds(Controller::Clock::duration duration) {
   return std::format("{:.3g} s", std::chrono::duration<double>(duration).count());
+}
+
+std::string Minutes(Controller::Clock::duration duration) {
+  if (duration < std::chrono::minutes(2)) return Seconds(duration);
+  return std::format("{:.0f} min", std::chrono::duration<double, std::ratio<60>>(duration).count());
+}
+
+// When the chain's output counts as silent, for restarting the monitor
+// (Timing::monitor_restart_every). At or below -50 dBFS, whatever the mic: a
+// gate or an expander gets there between words.
+constexpr float kSilentPeak = 0.0031623f;  // -50 dBFS
+// A mic without one never does, so within 6 dB of its noise floor counts
+// too: nobody is talking...
+constexpr float kFloorMargin = 1.9953f;  // +6 dB
+// ...unless the floor is that loud. A mic that never gets down to -30 dBFS
+// isn't restarted, and its delay grows until the monitor's buffer overflows,
+// which restarts it too (plan.md, Long-run latency).
+constexpr float kQuietCeiling = 0.031623f;  // -30 dBFS
+
+std::string Dbfs(float peak) {
+  return peak > 0 ? std::format("{:.0f} dBFS", 20 * std::log10(peak)) : std::string("-inf dBFS");
 }
 
 }  // namespace
@@ -119,10 +141,12 @@ void Controller::Tick(Clock::time_point now) {
   if (loaded_ && now >= next_check_) {
     next_check_ = now + timing_.watchdog_interval;
     const uint64_t packets = backend_.ChainPackets();
+    const float peak = backend_.TakeChainPeak();
     if (packets != last_packets_) {
       last_packets_ = packets;
       last_audio_ = now;
       if (now - running_since_ >= timing_.healthy_after) stalls_ = 0;
+      FollowLevel(peak, now);
     } else if (now - last_audio_ >= timing_.stall_timeout) {
       const Clock::duration delay = timing_.retry_delays[std::min(stalls_, timing_.retry_delays.size() - 1)];
       ++stalls_;
@@ -265,6 +289,11 @@ void Controller::Reconcile(Clock::time_point now) {
       last_audio_ = started_at;
       last_packets_ = 0;
       next_check_ = started_at + timing_.watchdog_interval;
+      // The chain's monitor is new too.
+      monitor_since_ = started_at;
+      monitor_restarted_ = false;
+      last_sound_ = started_at;
+      peaks_.clear();
       backend_.Log(std::format("Loaded the chain: {}", FormatChain(*next.chain, false)));
     } else {
       chain_error_ = started.error();
@@ -337,6 +366,29 @@ void Controller::ClearFailures() {
   chain_error_.reset();
   retry_at_.reset();
   stalls_ = 0;
+}
+
+void Controller::FollowLevel(float peak, Clock::time_point now) {
+  peaks_.push_back(peak);
+  const auto window = std::max<Clock::rep>(1, timing_.noise_floor_window / timing_.watchdog_interval);
+  while (peaks_.size() > static_cast<size_t>(window)) peaks_.pop_front();
+  const float floor = *std::min_element(peaks_.begin(), peaks_.end());
+  const float silent = std::max(kSilentPeak, std::min(floor * kFloorMargin, kQuietCeiling));
+  if (peak > silent) {
+    last_sound_ = now;
+    return;
+  }
+  if (now - monitor_since_ < timing_.monitor_restart_every || now - last_sound_ < timing_.monitor_restart_silence) {
+    return;
+  }
+  backend_.RestartMonitor();
+  backend_.Log(std::format("Restarted the monitor {} after {}, {} into silence (at or below {}{}), so the delay to "
+                           "the cable starts again from the least.",
+                           Minutes(now - monitor_since_), monitor_restarted_ ? "its last restart" : "the chain started",
+                           Seconds(now - last_sound_), Dbfs(silent),
+                           silent > kSilentPeak ? ", within 6 dB of the noise floor" : ""));
+  monitor_since_ = now;
+  monitor_restarted_ = true;
 }
 
 bool Controller::MicIsDefault() const {

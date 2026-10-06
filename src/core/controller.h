@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <optional>
 #include <string>
@@ -27,7 +28,10 @@ namespace knobs::core {
 // chain runs only while the state is kRunning. Every other state releases
 // it, which frees the mic and the cable, and the next kRunning loads it
 // again with libobs's loader (plan.md, M3 findings). A re-import while the
-// chain runs reloads it only if the chain changed (ChainPlan::SameAs).
+// chain runs reloads it only if the chain changed (ChainPlan::SameAs). While
+// the chain runs, a watchdog checks that it gets audio, and the monitor is
+// restarted now and then while the output is silent, so the delay to the
+// cable can't creep up (Timing).
 class Controller {
  public:
   using Clock = std::chrono::steady_clock;
@@ -52,6 +56,21 @@ class Controller {
                                                  std::chrono::seconds(60)};
     // A chain that has had audio for this long starts the waits over.
     Clock::duration healthy_after = std::chrono::seconds(30);
+    // Restarting the monitor (plan.md, Long-run latency). libobs's monitor
+    // doesn't correct its delay for a mic: a hiccup raises it, and a mic
+    // whose clock runs faster than the cable's raises it steadily, until the
+    // monitor's 1 s buffer overflows. A restart opens a fresh stream, at the
+    // least delay. Not sooner than this after the chain started or last
+    // restarted: the iD4's clock and VB-Cable's are 31.5 ppm apart, and a mic
+    // that much faster than its cable adds 19 ms in 10 min, two engine
+    // periods. Where a restart lands varies by about one...
+    Clock::duration monitor_restart_every = std::chrono::minutes(10);
+    // ...and only once the chain's output has been silent for this long, so
+    // the gap a restart leaves falls in silence.
+    Clock::duration monitor_restart_silence = std::chrono::seconds(3);
+    // A mic without a gate is never silent. Then silent means as quiet as it
+    // has been in this long: its noise floor.
+    Clock::duration noise_floor_window = std::chrono::minutes(5);
     // Read once a chain has started, since the watchdog times it from then.
     // That can be seconds after the event that started it: the first start
     // makes the runtime copy. Tests on a fake clock pass theirs.
@@ -109,6 +128,10 @@ class Controller {
   void StopChain();
   // Forgets failures, so the next Reconcile tries again.
   void ClearFailures();
+  // Hears the running chain's peak since the last watchdog check, and
+  // restarts the monitor once that's due and the output has been silent
+  // long enough.
+  void FollowLevel(float peak, Clock::time_point now);
   bool MicIsDefault() const;
   bool MicPresent() const;
   bool CablePresent() const;
@@ -156,6 +179,11 @@ class Controller {
   size_t stalls_ = 0;  // In a row, without a healthy run between.
   std::optional<Clock::time_point> retry_at_;
   std::string stall_detail_;
+  // Restarting the monitor.
+  Clock::time_point monitor_since_;  // When the chain started or the monitor last restarted.
+  bool monitor_restarted_ = false;   // Since the chain started.
+  Clock::time_point last_sound_;     // The last check that heard more than silence.
+  std::deque<float> peaks_;          // Each check's peak over Timing::noise_floor_window, newest last.
 };
 
 }  // namespace knobs::core

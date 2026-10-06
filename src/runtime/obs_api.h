@@ -93,6 +93,7 @@ namespace knobs::runtime {
   X(obs_enum_audio_monitoring_devices)        \
   X(obs_set_audio_monitoring_device)          \
   X(obs_source_set_monitoring_type)           \
+  X(obs_reset_audio_monitoring)               \
   /* Signals */                               \
   X(obs_source_get_signal_handler)            \
   X(signal_handler_connect)                   \

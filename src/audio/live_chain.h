@@ -81,6 +81,13 @@ class LiveChain {
 
   obs_source_t* source() const { return source_; }
 
+  // Opens the monitor's stream afresh. libobs opens a new one on the
+  // monitoring device, then stops the old one, dropping what it had queued,
+  // and packets that come in between are lost (audio_monitor_reset in
+  // wasapi-output.c). It's how OBS moves monitors to another device. It
+  // restarts every monitor in the process; knobs has one.
+  void RestartMonitor();
+
  private:
   LiveChain(const runtime::ObsApi& api, runtime::ObsSession& session, obs_source_t* source)
       : api_(api), session_(session), source_(source) {}

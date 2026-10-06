@@ -52,6 +52,8 @@ class ObsBackend : public Backend {
   Status StartChain(const ChainPlan& plan) override;
   void StopChain() override;
   uint64_t ChainPackets() override;
+  float TakeChainPeak() override;
+  void RestartMonitor() override;
   void Log(std::string_view line) override;
 
  protected:
@@ -59,13 +61,18 @@ class ObsBackend : public Backend {
   runtime::ObsHost* host() { return host_.get(); }
 
  private:
-  // A capture callback on the chain: counts what it filters.
-  static void CountPacket(void* param, obs_source_t* source, const audio_data* audio, bool muted);
+  // A capture callback on the chain: counts what it filters and keeps the
+  // peak. It only reads the samples.
+  static void OnChainAudio(void* param, obs_source_t* source, const audio_data* audio, bool muted);
 
   ObsBackendOptions options_;
   std::unique_ptr<runtime::ObsHost> host_;
   std::unique_ptr<audio::LiveChain> chain_;
   std::atomic<uint64_t> packets_ = 0;
+  std::atomic<float> peak_ = 0;  // Before the volume.
+  // The chain's volume, which the monitor applies after the capture
+  // callbacks. knobs never changes it while the chain runs.
+  float volume_ = 1;
   // Prunes runtime copies, writing to host_'s log. Only the file system and
   // the log, which is thread-safe. Stopped and joined first thing in the
   // destructor.

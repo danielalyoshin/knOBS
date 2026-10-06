@@ -87,6 +87,15 @@ class Backend {
   // Audio packets the running chain has filtered since it started. Silence
   // counts: win-wasapi passes silent packets on as zeros.
   virtual uint64_t ChainPackets() = 0;
+  // The loudest sample the running chain has sent to the monitor since the
+  // last call (or since it started), as the monitor plays it: after the
+  // source's volume. 1 is full scale.
+  virtual float TakeChainPeak() = 0;
+  // Opens the running chain's monitor stream afresh, dropping the audio it
+  // had queued, so the delay to the cable starts again from the least. The
+  // chain keeps running; the packets that come meanwhile are lost (plan.md,
+  // Long-run latency).
+  virtual void RestartMonitor() = 0;
   // A line for knobs's log, once there is one.
   virtual void Log(std::string_view line) = 0;
 };

@@ -50,6 +50,8 @@ namespace fs = std::filesystem;
 
 constexpr int kMaxSeconds = 24 * 3600;
 
+const core::Controller::Timing kTiming;
+
 std::string Usage() {
   return std::format(R"(Usage: knobs-core [options]
 
@@ -68,6 +70,9 @@ Options:
   --stall <s>              Without --live: the stand-in stops delivering audio s
                            seconds after each start, so the core's watchdog
                            rebuilds it.
+  --restart-monitor <s>    Restart the monitor s seconds after the chain starts or
+                           last restarted, rather than {2} min, once the output has
+                           been silent for {3} s. The log has each restart.
   --seconds <s>            Stop after s seconds. Default: run until Ctrl+C or q.
   --ignore-obs             Don't watch for OBS: carry on as if it never runs.
   --cable <name|id>        Send the mic to this playback device. Default: the OBS
@@ -81,12 +86,15 @@ Options:
 
 Keys while it runs: p pauses, r resumes, i imports again, q quits.
 )",
-                     kDisplayName, kImportUsage);
+                     kDisplayName, kImportUsage,
+                     std::chrono::duration_cast<std::chrono::minutes>(kTiming.monitor_restart_every).count(),
+                     std::chrono::duration_cast<std::chrono::seconds>(kTiming.monitor_restart_silence).count());
 }
 
 struct Options {
   bool live = false;
   std::optional<int> stall_seconds;
+  std::optional<int> restart_monitor_seconds;
   int seconds = 0;
   bool ignore_obs = false;
   std::string cable;
@@ -130,6 +138,9 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       const auto seconds = ParseSeconds(value, 1);
       ok = seconds.has_value();
       options.seconds = seconds.value_or(0);
+    } else if (arg == L"--restart-monitor") {
+      options.restart_monitor_seconds = ParseSeconds(value, 1);
+      ok = options.restart_monitor_seconds.has_value();
     } else if (arg == L"--stall") {
       options.stall_seconds = ParseSeconds(value, 0);
       ok = options.stall_seconds.has_value();
@@ -196,6 +207,10 @@ class DryBackend : public core::ObsBackend {
     if (stall_seconds_) delivered = std::min<Clock::duration>(delivered, std::chrono::seconds(*stall_seconds_));
     return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::milliseconds>(delivered).count() / 10);
   }
+
+  // Nothing is monitored. The stand-in source sends nothing, which counts as
+  // silence, so the core restarts the monitor as often as it may.
+  void RestartMonitor() override { Log("Dry run: there's no monitor to restart."); }
 
  private:
   std::optional<int> stall_seconds_;
@@ -306,6 +321,9 @@ int Run(const Options& options) {
   core::CoreOptions core_options;
   core_options.settings = settings;
   if (options.ignore_obs) core_options.obs_running = [] { return false; };
+  if (options.restart_monitor_seconds) {
+    core_options.timing.monitor_restart_every = std::chrono::seconds(*options.restart_monitor_seconds);
+  }
   PrintingObserver observer;
   const auto start = Clock::now();
   const double cpu_start = CpuSeconds();

@@ -96,6 +96,9 @@ struct FakeBackend : Backend {
   std::optional<std::string> chain_error;
   // Whether the running chain gets audio.
   bool flowing = true;
+  // The loudest sample the running chain sends to the monitor, each time
+  // it's asked.
+  float peak = 0;
 
   int libobs_starts = 0;
   import::ProfileAudio libobs_audio;
@@ -106,6 +109,7 @@ struct FakeBackend : Backend {
   bool chain_running = false;
   std::optional<ChainPlan> last_plan;
   uint64_t packets = 0;
+  int monitor_restarts = 0;
 
   std::function<void()> on_call;
   std::function<void()> on_start_libobs;
@@ -181,6 +185,16 @@ struct FakeBackend : Backend {
     CHECK(chain_running);
     if (flowing) packets += 100;
     return packets;
+  }
+  float TakeChainPeak() override {
+    Called();
+    CHECK(chain_running);
+    return peak;
+  }
+  void RestartMonitor() override {
+    Called();
+    CHECK(chain_running);
+    ++monitor_restarts;
   }
   void Log(std::string_view) override { Called(); }
 
@@ -635,6 +649,103 @@ TEST(CoreTimesTheWatchdogFromTheChainsStart) {
   f.backend.flowing = true;
   f.Advance(10s);
   CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1);
+}
+
+// Peaks of the chain's output, each second.
+constexpr float kVoice = 0.2f;           // -14 dBFS
+constexpr float kExpanded = 0.0004f;     // -68 dBFS: an expander between words
+constexpr float kRoomNoise = 0.0063f;    // -44 dBFS: no gate, the mic's noise floor
+constexpr float kLoudFloor = 0.05f;      // -26 dBFS
+
+const Clock::duration kRestartEvery = Controller::Timing{}.monitor_restart_every;
+
+// Talks at `voice` in `words`-long stretches, with `pause`s at `floor`
+// between, for `total`.
+void Talk(Fixture& f, Clock::duration total, Clock::duration words, Clock::duration pause, float floor,
+          float voice = kVoice) {
+  for (Clock::duration done{}; done < total; done += words + pause) {
+    f.backend.peak = voice;
+    f.Advance(words);
+    f.backend.peak = floor;
+    f.Advance(pause);
+  }
+}
+
+TEST(CoreRestartsTheMonitorInSilence) {
+  Fixture f;
+  f.backend.peak = kVoice;
+  f.controller.Start(false, f.now);
+  // Never while there's sound, however long.
+  f.Advance(45min);
+  CHECK(f.backend.monitor_restarts == 0);
+  // Once it's due, after 3 s of silence.
+  f.backend.peak = kExpanded;
+  f.Advance(2s);
+  CHECK(f.backend.monitor_restarts == 0);
+  f.Advance(1s);
+  CHECK(f.backend.monitor_restarts == 1);
+  // No sooner than Timing::monitor_restart_every after the last, however
+  // silent. Digital silence too, from a gate.
+  f.backend.peak = 0;
+  f.Advance(kRestartEvery - 1min);
+  CHECK(f.backend.monitor_restarts == 1);
+  f.Advance(1min);
+  CHECK(f.backend.monitor_restarts == 2);
+  // The chain runs on: no rebuild, no new state.
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 1 && f.backend.chain_running);
+
+  // Pauses in speech shorter than 3 s don't count.
+  Talk(f, 40min, 10s, 2s, kExpanded);
+  CHECK(f.backend.monitor_restarts == 2);
+  Talk(f, 30s, 10s, 3s, kExpanded);
+  CHECK(f.backend.monitor_restarts == 3);
+}
+
+TEST(CoreRestartsTheMonitorOfAMicWithoutAGate) {
+  // Its output never gets down to -50 dBFS, but pauses at its noise floor
+  // are as quiet as it gets.
+  Fixture f;
+  f.controller.Start(false, f.now);
+  Talk(f, kRestartEvery - 1min, 20s, 5s, kRoomNoise);
+  CHECK(f.backend.monitor_restarts == 0);
+  Talk(f, 2min, 20s, 5s, kRoomNoise);
+  CHECK(f.backend.monitor_restarts == 1);
+  // Sound less than 6 dB over the floor counts as silence...
+  f.backend.peak = kRoomNoise * 1.5f;
+  f.Advance(kRestartEvery + 1min);
+  CHECK(f.backend.monitor_restarts == 2);
+  // ...but a softer voice than that doesn't.
+  Talk(f, 40min, 20s, 1s, kRoomNoise, kRoomNoise * 2.5f);
+  CHECK(f.backend.monitor_restarts == 2);
+
+  // A floor above -36 dBFS is never quiet enough: the delay grows until the
+  // monitor's buffer overflows, which libobs answers with a restart of its
+  // own.
+  Fixture loud;
+  loud.controller.Start(false, loud.now);
+  Talk(loud, 2h, 20s, 5s, kLoudFloor);
+  CHECK(loud.backend.monitor_restarts == 0);
+}
+
+TEST(CoreTimesMonitorRestartsFromTheChainsStart) {
+  Fixture f;  // A silent mic.
+  f.controller.Start(false, f.now);
+  f.Advance(kRestartEvery - 5min);
+  // Not while paused, and a rebuilt chain has a new monitor.
+  f.controller.Pause(f.now);
+  f.Advance(10min);
+  f.controller.Resume(f.now);
+  CHECK(f.state() == State::kRunning && f.backend.chain_starts == 2);
+  f.Advance(kRestartEvery - 1min);
+  CHECK(f.backend.monitor_restarts == 0);
+  f.Advance(1min);
+  CHECK(f.backend.monitor_restarts == 1);
+
+  // Nor while the mic sends nothing, which is the watchdog's.
+  f.Advance(kRestartEvery - 1s);
+  f.backend.flowing = false;
+  f.Advance(3s);
+  CHECK(f.backend.monitor_restarts == 1 && f.state() == State::kMicMissing);
 }
 
 TEST(CoreStaysPausedUntilResumed) {

@@ -114,6 +114,10 @@ class FakeBackend : public core::Backend {
   // Flowing unless stalled: 10 ms packets, a second's worth each time it's
   // asked. Counted from the chain's start, as the real backend counts.
   uint64_t ChainPackets() override { return world_->Get().stalled ? packets_ : packets_ += 100; }
+  // The made-up mic is silent, so the core restarts the monitor as often as
+  // it may; there's no monitor to restart.
+  float TakeChainPeak() override { return 0; }
+  void RestartMonitor() override {}
   void Log(std::string_view line) override { log_(line); }
 
  private:

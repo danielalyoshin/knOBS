@@ -3,6 +3,8 @@
 
 #include <windows.h>
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <format>
 #include <utility>
@@ -161,24 +163,43 @@ Status ObsBackend::StartChain(const ChainPlan& plan) {
   if (!chain) return Error{chain.error()};
   chain_ = std::move(*chain);
   packets_ = 0;
-  api.obs_source_add_audio_capture_callback(chain_->source(), CountPacket, this);
+  peak_ = 0;
+  volume_ = api.obs_source_get_volume(chain_->source());
+  api.obs_source_add_audio_capture_callback(chain_->source(), OnChainAudio, this);
   return Ok{};
 }
 
 void ObsBackend::StopChain() {
   if (!chain_) return;
-  host_->api().obs_source_remove_audio_capture_callback(chain_->source(), CountPacket, this);
+  host_->api().obs_source_remove_audio_capture_callback(chain_->source(), OnChainAudio, this);
   chain_.reset();
 }
 
 uint64_t ObsBackend::ChainPackets() { return packets_.load(std::memory_order_relaxed); }
 
+float ObsBackend::TakeChainPeak() { return peak_.exchange(0, std::memory_order_relaxed) * volume_; }
+
+void ObsBackend::RestartMonitor() {
+  if (chain_) chain_->RestartMonitor();
+}
+
 void ObsBackend::Log(std::string_view line) {
   if (host_) host_->log().Write(LOG_INFO, line);
 }
 
-void ObsBackend::CountPacket(void* param, obs_source_t*, const audio_data*, bool) {
-  static_cast<ObsBackend*>(param)->packets_.fetch_add(1, std::memory_order_relaxed);
+void ObsBackend::OnChainAudio(void* param, obs_source_t*, const audio_data* audio, bool) {
+  auto* backend = static_cast<ObsBackend*>(param);
+  backend->packets_.fetch_add(1, std::memory_order_relaxed);
+  // Planar float, one plane per channel, as libobs mixes; the planes past
+  // the last channel are null.
+  float peak = 0;
+  for (size_t c = 0; c < MAX_AV_PLANES && audio->data[c]; ++c) {
+    const float* samples = reinterpret_cast<const float*>(audio->data[c]);
+    for (uint32_t i = 0; i < audio->frames; ++i) peak = std::max(peak, std::fabs(samples[i]));
+  }
+  float seen = backend->peak_.load(std::memory_order_relaxed);
+  while (peak > seen && !backend->peak_.compare_exchange_weak(seen, peak, std::memory_order_relaxed)) {
+  }
 }
 
 }  // namespace knobs::core
