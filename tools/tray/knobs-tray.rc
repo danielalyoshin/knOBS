@@ -1,7 +1,37 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-// knobs-tray.exe's resources: the icon the tray shows.
+// knobs-tray.exe's resources: the icon the tray shows, and the name its
+// notifications show, which is knobs.exe's.
 
+#include <winver.h>
+
+#include "app_info.h"
 #include "tray/resource.h"
+#include "version.h"
 
 // assets\knobs.ico, found through the resource compiler's include path.
 IDI_KNOBS ICON "knobs.ico"
+
+VS_VERSION_INFO VERSIONINFO
+FILEVERSION KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH, 0
+PRODUCTVERSION KNOBS_VERSION_MAJOR, KNOBS_VERSION_MINOR, KNOBS_VERSION_PATCH, 0
+FILEFLAGSMASK VS_FFI_FILEFLAGSMASK
+FILEFLAGS 0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", KNOBS_DISPLAY_NAME
+      VALUE "FileVersion", KNOBS_VERSION
+      VALUE "ProductName", KNOBS_DISPLAY_NAME
+      VALUE "ProductVersion", KNOBS_VERSION
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END

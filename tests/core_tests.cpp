@@ -407,6 +407,7 @@ TEST(CoreAsksForARestartToFollowObs) {
   f.backend.config.audio.speakers = SPEAKERS_MONO;
   f.controller.Reimport(f.now);
   CHECK(f.state() == State::kRestartNeeded && !f.backend.chain_running && f.backend.libobs_starts == 1);
+  CHECK(f.last().restart == RestartNeed::kAudioChanged);
   CHECK(f.last().detail.find("from 48000 Hz Stereo to 44100 Hz Mono") != std::string::npos);
 
   // Changed back before the restart: carries on.
@@ -417,11 +418,12 @@ TEST(CoreAsksForARestartToFollowObs) {
   f.backend.obs.install.version = {32, 2, 3};
   f.controller.Reimport(f.now);
   CHECK(f.state() == State::kRestartNeeded && f.last().detail.find("from 32.2.2 to 32.2.3") != std::string::npos);
+  CHECK(f.last().restart == RestartNeed::kObsUpdated);
 
   f.backend.obs = {ObsFound::kUnsupported, {"C:\\obs-studio", {33, 0, 0}}, "OBS 33.0.0 isn't supported."};
   f.controller.SetObsRunning(true, f.now);
   f.controller.SetObsRunning(false, f.now);
-  CHECK(f.state() == State::kObsUnsupported && !f.backend.chain_running);
+  CHECK(f.state() == State::kObsUnsupported && !f.backend.chain_running && f.last().restart == RestartNeed::kNone);
 }
 
 TEST(CoreRebuildsTheChainWhenALostMicComesBack) {

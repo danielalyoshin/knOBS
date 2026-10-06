@@ -8,6 +8,9 @@
 //               already running, quit without a word. Doesn't open the first
 //               run.
 //   --restart   Started by a copy that's quitting to restart: wait for it.
+//   --restarted-for <reason>
+//               Why: obs-updated or audio-changed. The new copy says so in a
+//               notification.
 
 #include <windows.h>
 #include <objbase.h>
@@ -24,6 +27,7 @@
 #include "core/core.h"
 #include "core/obs_backend.h"
 #include "tray/autostart.h"
+#include "tray/notices.h"
 #include "tray/single_instance.h"
 #include "tray/tray_app.h"
 #include "util/app_dirs.h"
@@ -66,7 +70,7 @@ Status StartCopy(const std::filesystem::path& exe, std::wstring_view arguments) 
   return Ok{};
 }
 
-int Run(HINSTANCE instance, bool startup, bool restart) {
+int Run(HINSTANCE instance, bool startup, bool restart, core::RestartNeed restarted_for) {
   const std::wstring window_class = std::format(L"{}.tray", kDisplayNameW);
   auto lock = tray::SingleInstance::Acquire(window_class, restart ? kRestartWait : 0ms);
   if (!lock) {
@@ -95,7 +99,11 @@ int Run(HINSTANCE instance, bool startup, bool restart) {
   options.log_folder = dirs->Logs();
   options.starts_with_windows = [run] { return tray::StartsWithWindows(run); };
   options.set_start_with_windows = [run](bool on) { return tray::SetStartWithWindows(run, on); };
-  options.restart = [exe] { return StartCopy(exe, L"--restart"); };
+  options.restart = [exe](core::RestartNeed why) {
+    if (why == core::RestartNeed::kNone) return StartCopy(exe, L"--restart");
+    return StartCopy(exe, std::format(L"--restart --restarted-for {}", FromUtf8(tray::RestartNeedName(why))));
+  };
+  options.restarted_for = restarted_for;
   options.start_core = [](core::Observer& observer, const core::Settings& settings) {
     core::ObsBackendOptions backend;
     backend.log_prefix = std::format(L"{} ", kDisplayNameW);
@@ -120,12 +128,16 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
   SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
   bool startup = false;
   bool restart = false;
+  core::RestartNeed restarted_for = core::RestartNeed::kNone;
   int argc = 0;
   if (LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc)) {
     for (int i = 1; i < argc; ++i) {
       const std::wstring_view arg = argv[i];
       startup |= arg == L"--startup";
       restart |= arg == L"--restart";
+      if (arg == L"--restarted-for" && i + 1 < argc) {
+        restarted_for = tray::RestartNeedNamed(ToUtf8(argv[++i])).value_or(core::RestartNeed::kNone);
+      }
     }
     LocalFree(argv);
   }
@@ -136,7 +148,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     tray::ShowStartupError(std::format("Couldn't initialize COM (0x{:08X}).", static_cast<uint32_t>(com)));
     return 1;
   }
-  const int code = Run(instance, startup, restart);
+  const int code = Run(instance, startup, restart, restarted_for);
   CoUninitialize();
   return code;
 }

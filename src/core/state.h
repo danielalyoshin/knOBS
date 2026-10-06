@@ -87,6 +87,14 @@ enum class SetupNeed {
   kCable,
 };
 
+enum class RestartNeed {
+  kNone,
+  // The OBS install is a new version, which needs a new runtime copy.
+  kObsUpdated,
+  // The OBS profile's sample rate or channels changed.
+  kAudioChanged,
+};
+
 // The chain as the user knows it from OBS.
 struct ChainSummary {
   std::string mic;                   // As OBS names it, e.g. "Mic/Aux".
@@ -102,7 +110,8 @@ std::string FormatChain(const ChainSummary& chain, bool short_form);
 
 struct Snapshot {
   State state = State::kStarting;
-  SetupNeed setup = SetupNeed::kNone;  // With kNeedsSetup.
+  SetupNeed setup = SetupNeed::kNone;      // With kNeedsSetup.
+  RestartNeed restart = RestartNeed::kNone;  // With kRestartNeeded.
   // What happened, in a sentence or two, for states that need explaining.
   std::string detail;
   // The imported chain, once an import has got as far as the mic.

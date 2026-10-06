@@ -29,7 +29,11 @@ struct FakeWorld {
   audio::Endpoints devices;
   // Virtual cables to plug in when none is connected (ToggleCables).
   std::vector<audio::AudioDevice> spare_cables;
+  // The devices' mics and default_mic, while they're unplugged (ToggleMics).
+  std::optional<audio::Endpoints> spare_mics;
   std::optional<std::string> chain_error;
+  // The running chain gets no audio, as when win-wasapi stops capturing.
+  bool stalled = false;
 };
 
 // The world, changed by knobs-tray's keys while the core's thread reads it.
@@ -79,6 +83,18 @@ void ToggleCables(FakeWorld& world);
 // and Limiter, as someone following the second door's steps might in OBS.
 // The core sees them at its next import, such as when OBS closes.
 void AddFilters(FakeWorld& world);
+// Unplugs the recording devices, keeping them as spares, or plugs them back
+// in.
+void ToggleMics(FakeWorld& world);
+// Adds Noise Suppression to the front of the first mic's chain in OBS, or
+// takes it out again. Seen at the next import.
+void EditChain(FakeWorld& world);
+// Adds a VST filter to the first mic in OBS, which knobs leaves out with a
+// warning, or takes it out again. Seen at the next import.
+void ToggleVstFilter(FakeWorld& world);
+// Updates OBS: from 32.2.2 to 32.2.3, then to 33.0.0, which knobs doesn't
+// support. Seen at the next import. Returns the new version.
+std::string UpdateObs(FakeWorld& world);
 
 class FakeBackend : public core::Backend {
  public:
@@ -93,8 +109,9 @@ class FakeBackend : public core::Backend {
   audio::Endpoints ListDevices() override { return world_->Get().devices; }
   Status StartChain(const core::ChainPlan& plan) override;
   void StopChain() override {}
-  // Always flowing: 10 ms packets, a second's worth each time it's asked.
-  uint64_t ChainPackets() override { return packets_ += 100; }
+  // Flowing unless stalled: 10 ms packets, a second's worth each time it's
+  // asked. Counted from the chain's start, as the real backend counts.
+  uint64_t ChainPackets() override { return world_->Get().stalled ? packets_ : packets_ += 100; }
   void Log(std::string_view line) override { log_(line); }
 
  private:
@@ -117,7 +134,7 @@ class FixtureBackend : public core::ObsBackend {
   audio::Endpoints ListDevices() override { return world_->Get().devices; }
   Status StartChain(const core::ChainPlan& plan) override;
   void StopChain() override {}
-  uint64_t ChainPackets() override { return packets_ += 100; }
+  uint64_t ChainPackets() override { return world_->Get().stalled ? packets_ : packets_ += 100; }
   void Log(std::string_view line) override {
     log_(line);
     ObsBackend::Log(line);

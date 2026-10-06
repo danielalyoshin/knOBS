@@ -80,6 +80,7 @@ class Controller {
     State state;
     std::string detail;
     SetupNeed setup = SetupNeed::kNone;
+    RestartNeed restart = RestartNeed::kNone;
   };
   // What libobs was started with.
   struct Libobs {

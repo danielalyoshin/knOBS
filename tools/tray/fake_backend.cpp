@@ -26,6 +26,7 @@ constexpr char kFixturePodcastMicId[] = "{0.0.1.00000000}.{00000000-0000-0000-00
 constexpr char kFixtureCableId[] = "{0.0.0.00000000}.{00000000-0000-0000-0000-00000000cab1}";
 
 const std::vector<std::string> kStepsFilters = {"Noise Suppression", "Noise Gate", "Compressor", "Limiter"};
+constexpr char kEditedFilter[] = "Noise Suppression";
 
 void SetFilters(import::ImportedMic& mic, std::vector<std::string> filters) {
   mic.filters = std::move(filters);
@@ -55,6 +56,12 @@ void RemoveOutput(FakeWorld& world, std::string_view id) {
 void MonitorToDefault(FakeWorld& world) {
   world.config.audio.monitoring_device_id = "default";
   world.config.audio.monitoring_device_name.clear();
+}
+
+import::ImportNote VstWarning() {
+  return {true, std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
+                            "plugins yet, so it leaves the filter out.",
+                            kDisplayName)};
 }
 
 // No virtual cable is installed. VB-Cable's input is the spare.
@@ -135,9 +142,7 @@ const std::vector<FakeScenario>& FakeScenarios() {
       {"warnings", "Mic/Aux has a VST filter and push-to-talk",
        [](FakeWorld& world, FakeScript&) {
          world.collection.front().notes = {
-             {true, std::format("Filter \"ReaComp\" is a VST plugin (reacomp-standalone.dll). {} can't run VST "
-                                "plugins yet, so it leaves the filter out.",
-                                kDisplayName)},
+             VstWarning(),
              {false, "Filter \"Expander\" is off in OBS, and stays off."},
              {false,
               std::format("The mic is on push-to-talk in OBS. libobs's monitor ignores mute, push-to-talk and "
@@ -164,7 +169,7 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {33, 0, 0}},
                       runtime::UnsupportedObsMessage("33.0.0")};
        }},
-      {"restart", "OBS was updated to 32.2.3 while knobs ran",
+      {"restart", "OBS was updated to 32.2.3 while knobs ran, so it restarts",
        [](FakeWorld& world, FakeScript& script) {
          world.obs_later = world.obs;
          world.obs_later->install.version = {32, 2, 3};
@@ -197,6 +202,49 @@ void AddFilters(FakeWorld& world) {
   for (import::ImportedMic& mic : world.collection) {
     if (mic.filters.empty()) SetFilters(mic, kStepsFilters);
   }
+}
+
+void ToggleMics(FakeWorld& world) {
+  if (world.spare_mics) {
+    world.devices.mics = std::move(world.spare_mics->mics);
+    world.devices.default_mic = std::move(world.spare_mics->default_mic);
+    world.spare_mics.reset();
+    return;
+  }
+  world.spare_mics = world.devices;
+  world.devices.mics.clear();
+  world.devices.default_mic.clear();
+}
+
+void EditChain(FakeWorld& world) {
+  if (world.collection.empty()) return;
+  import::ImportedMic& mic = world.collection.front();
+  std::vector<std::string> filters = mic.filters;
+  if (!filters.empty() && filters.front() == kEditedFilter) {
+    filters.erase(filters.begin());
+  } else {
+    filters.insert(filters.begin(), kEditedFilter);
+  }
+  SetFilters(mic, std::move(filters));
+}
+
+void ToggleVstFilter(FakeWorld& world) {
+  if (world.collection.empty()) return;
+  std::vector<import::ImportNote>& notes = world.collection.front().notes;
+  // Left out of the chain, so the chain's key stays the same.
+  const import::ImportNote warning = VstWarning();
+  if (std::erase(notes, warning) == 0) notes.insert(notes.begin(), warning);
+}
+
+std::string UpdateObs(FakeWorld& world) {
+  world.obs_later.reset();
+  if (world.obs.install.version < runtime::ObsVersion{32, 2, 3}) {
+    world.obs.install.version = {32, 2, 3};
+  } else {
+    world.obs = {core::ObsFound::kUnsupported, {world.obs.install.root, {33, 0, 0}},
+                 runtime::UnsupportedObsMessage("33.0.0")};
+  }
+  return world.obs.install.version.ToString();
 }
 
 core::ObsCheck FakeBackend::CheckObs(const core::Settings&) {
@@ -235,12 +283,14 @@ Result<core::MicImport> FakeBackend::ImportMic(const import::ActiveObsConfig&, s
 Status FakeBackend::StartChain(const core::ChainPlan& plan) {
   if (const FakeWorld world = world_->Get(); world.chain_error) return Error{*world.chain_error};
   Log(std::format("The chain would run into \"{}\".", plan.cable.name));
+  packets_ = 0;
   return Ok{};
 }
 
 Status FixtureBackend::StartChain(const core::ChainPlan& plan) {
   if (const FakeWorld world = world_->Get(); world.chain_error) return Error{*world.chain_error};
   Log(std::format("The chain would run into \"{}\".", plan.cable.name));
+  packets_ = 0;
   return Ok{};
 }
 

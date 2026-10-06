@@ -2,11 +2,11 @@
 //
 // knobs-tray: runs the tray app (src/tray) against a fake core: the real
 // core and its decisions, on a made-up OBS install, scene collection and
-// audio devices (fake_backend.h). Every state of the menu and every page of
-// the first run can be checked without OBS or an audio device, and
-// --screenshot saves a picture of either. --obs-config imports a real OBS
-// settings folder instead, such as tests/fixtures/obs-config, with the
-// installed OBS's libobs.
+// audio devices (fake_backend.h). Every state of the menu, every page of the
+// first run and every notification can be checked without OBS or an audio
+// device, and --screenshot saves a picture of any of them. --obs-config
+// imports a real OBS settings folder instead, such as
+// tests/fixtures/obs-config, with the installed OBS's libobs.
 
 #include <windows.h>
 #include <conio.h>
@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cwctype>
 #include <filesystem>
 #include <format>
@@ -27,8 +28,11 @@
 #include "common/console.h"
 #include "common/obs_import.h"
 #include "core/core.h"
+#include "tray/badge.h"
 #include "tray/fake_backend.h"
 #include "tray/first_run.h"
+#include "tray/notices.h"
+#include "tray/resource.h"
 #include "tray/screenshot.h"
 #include "tray/tray_app.h"
 #include "util/app_dirs.h"
@@ -48,6 +52,18 @@ constexpr UINT kSettleMs = 600;
 constexpr UINT kStepMs = 400;
 // Around the menus in a screenshot, for their shadows.
 constexpr int kMarginPx = 24;
+// What the '.' key waits.
+constexpr UINT kPauseMs = 1000;
+// A notification slides in, and stays for 5 s by default.
+constexpr auto kNotificationShows = 1500ms;
+// How long a notification screenshot waits for one.
+constexpr UINT kNotificationWaitMs = 20'000;
+// The icon sheet (--icons): each size of the tray icon, magnified, and as it
+// is, on a light and a dark taskbar's color.
+constexpr int kIconSizes[] = {16, 20, 24, 32};
+constexpr int kIconZoom = 6;
+constexpr uint32_t kLightTaskbar = 0xffeeeeee;
+constexpr uint32_t kDarkTaskbar = 0xff1c1c1c;
 
 std::string Usage() {
   std::string states;
@@ -69,25 +85,39 @@ against the fake.
 
 Options:
   --state <name>         The state to start in (below). Default: running.
-  --theme <name>         system (Windows' mode), light or dark. Default: system.
+  --theme <name>         system (Windows' mode), light or dark, for the menu and
+                         the badges' colors. Default: system.
   --settings <file>      Read the settings from this file and save changes to it.
+                         Without it, the first run counts as finished unless
+                         --first-run is given.
   --start-with-windows   Start with "Start with Windows" checked.
+  --restarted-for <why>  Start as the copy {0} starts to follow OBS, which says
+                         why in a notification: obs-updated or audio-changed.
   --first-run <page>     Open the first run: "resume" opens it as {0} does, a
                          page's name opens that page. Pages: {1}.
-  --press <keys>         With --first-run: press these keys (below) one at a time
-                         once it has settled, waiting for each to settle.
+  --press <keys>         Press these keys (below) one at a time once it has
+                         settled, waiting for each to settle, then quit. With
+                         --first-run, in the first run.
   --screenshot <png>     Open the menu, or the first run, save a picture of it,
-                         and quit.
+                         and quit. After --press, a dialog the keys opened.
   --open <name>          With --screenshot, open mic, cable or other (Cable's
                          "Other devices") for the picture. about takes that
-                         dialog instead of the menu.
+                         dialog instead of the menu, and notification the
+                         notification the keys bring up, from the screen.
+  --icons <png>          Save a sheet of the tray icon with each badge, at
+                         16, 20, 24 and 32 px on a light and a dark taskbar,
+                         and quit.
 {2}
                          With --obs-config, the installed OBS's libobs imports
                          that folder, as {0} does. The audio devices are made
                          up to match tests/fixtures/obs-config's.
 
 Keys while it runs: o opens or closes OBS, c plugs the virtual cables in or out,
-f adds filters to OBS's mics without any (seen when OBS closes), q quits. In the
+m the mics, s stalls the chain or starts it again, f adds filters to OBS's mics
+without any, e adds Noise Suppression to the first mic's chain or takes it out,
+v adds a VST filter to it or takes it out, u updates OBS (to 32.2.3, then to
+33.0.0), i re-imports from OBS, a clicks the notification, . waits a second,
+and q quits. Changes in OBS are seen when it closes or at a re-import. In the
 first run: y and n click the doors ("I set up my mic in OBS", "I'm new to OBS"),
 x Next, b Back, d Done, p Open OBS (which only says so: OBS would open the
 mic), 1 to 9 pick a choice, and k unchecks the check box.
@@ -110,6 +140,9 @@ struct Options {
   std::optional<fs::path> screenshot;
   std::wstring keys;    // Menu mnemonics to press before the picture.
   unsigned dialog = 0;  // Or the menu command whose dialog to take instead.
+  bool notification = false;  // Or the notification the keys bring up.
+  core::RestartNeed restarted_for = core::RestartNeed::kNone;
+  std::optional<fs::path> icons;
 };
 
 std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
@@ -154,6 +187,12 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       }
     } else if (arg == L"--press") {
       options.presses = value;
+    } else if (arg == L"--restarted-for") {
+      const auto why = tray::RestartNeedNamed(ToUtf8(value));
+      if (!why) return std::nullopt;
+      options.restarted_for = *why;
+    } else if (arg == L"--icons") {
+      options.icons = fs::absolute(value);
     } else if (arg == L"--screenshot") {
       options.screenshot = fs::absolute(value);
     } else if (arg == L"--open") {
@@ -166,6 +205,8 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
         options.keys = L"co";
       } else if (value == L"about") {
         options.dialog = tray::kIdAbout;
+      } else if (value == L"notification") {
+        options.notification = true;
       } else {
         return std::nullopt;
       }
@@ -173,8 +214,9 @@ std::optional<Options> ParseArgs(int argc, wchar_t** argv) {
       return std::nullopt;
     }
   }
-  if ((!options.keys.empty() || options.dialog) && (!options.screenshot || options.first_run)) return std::nullopt;
-  if (!options.presses.empty() && !options.first_run) return std::nullopt;
+  if ((!options.keys.empty() || options.dialog || options.notification) && (!options.screenshot || options.first_run)) {
+    return std::nullopt;
+  }
   return options;
 }
 
@@ -214,6 +256,11 @@ struct Session {
   bool first_run_opened = false;
   size_t presses_done = 0;
   bool screenshot_taken = false;
+  bool ended = false;
+  // The notification last shown, and when.
+  std::optional<Clock::time_point> notice_shown;
+  bool waiting_for_notice = false;
+  UINT_PTR notice_timer = 0;
   // The screenshot.
   HWND backdrop = nullptr;
   size_t keys_sent = 0;
@@ -225,8 +272,9 @@ Session* g_session = nullptr;
 void TakeScreenshot();
 void TakeDialogScreenshot();
 void OpenFirstRun();
+void TakeNotificationScreenshot();
 
-void WaitToSettle();
+void WaitToSettle(UINT ms = kSettleMs);
 
 // The keys, from the console or --press.
 void Press(wchar_t key) {
@@ -252,6 +300,46 @@ void Press(wchar_t key) {
     case L'f':
       session.world->Change(AddFilters);
       Print("OBS's mics without filters get some (seen at the next import)\n");
+      break;
+    case L'm': {
+      bool plugged = false;
+      session.world->Change([&plugged](FakeWorld& world) {
+        ToggleMics(world);
+        plugged = !world.spare_mics;
+      });
+      Print(plugged ? "mics plugged in\n" : "mics unplugged\n");
+      if (session.core) session.core->DevicesChanged();
+      break;
+    }
+    case L's': {
+      bool stalled = false;
+      session.world->Change([&stalled](FakeWorld& world) { stalled = world.stalled = !world.stalled; });
+      Print(stalled ? "the chain gets no audio\n" : "the chain gets audio again\n");
+      break;
+    }
+    case L'e':
+      session.world->Change(EditChain);
+      Print("the first mic's chain changes in OBS (seen at the next import)\n");
+      break;
+    case L'v':
+      session.world->Change(ToggleVstFilter);
+      Print("the first mic gets a VST filter in OBS, or loses it (seen at the next import)\n");
+      break;
+    case L'u': {
+      std::string version;
+      session.world->Change([&version](FakeWorld& world) { version = UpdateObs(world); });
+      Print(std::format("OBS is updated to {} (seen at the next import)\n", version));
+      break;
+    }
+    case L'i':
+      Print("menu: Re-import from OBS\n");
+      session.app->Execute(tray::kIdReimport);
+      break;
+    case L'a':
+      Print("the notification is clicked\n");
+      session.app->OpenNotice();
+      break;
+    case L'.':
       break;
     case L'q':
       session.app->Quit();
@@ -305,40 +393,56 @@ void CALLBACK OnSettled(HWND, UINT, UINT_PTR timer, DWORD) {
     OpenFirstRun();
     return;
   }
-  if (session.first_run_opened) {
-    // The first run is open: this runs in its loop.
-    if (session.presses_done < session.options.presses.size()) {
-      const wchar_t key = session.options.presses[session.presses_done++];
-      Print(std::format("press {}\n", ToUtf8(std::wstring(1, key))));
-      Press(key);
-      // A key may change nothing the core reports.
-      WaitToSettle();
-      return;
+  if (session.presses_done < session.options.presses.size()) {
+    // In the first run's loop, if it's open.
+    const wchar_t key = session.options.presses[session.presses_done++];
+    Print(std::format("press {}\n", ToUtf8(std::wstring(1, key))));
+    // A key may change nothing the core reports. The wait starts before the
+    // key too, which may open a dialog and run its loop until it closes.
+    const UINT wait = key == L'.' ? kPauseMs : kSettleMs;
+    WaitToSettle(wait);
+    Press(key);
+    WaitToSettle(wait);
+    return;
+  }
+  const HWND dialog = OpenDialog();
+  if (session.options.notification) {
+    if (!session.waiting_for_notice) {
+      session.waiting_for_notice = true;
+      TakeNotificationScreenshot();
     }
-    const HWND dialog = OpenDialog();
-    if (session.options.screenshot && !session.screenshot_taken) {
+    return;
+  }
+  if (session.options.screenshot && !session.screenshot_taken) {
+    if (dialog || session.first_run_opened) {
       session.screenshot_taken = true;
       const Status saved = dialog ? SaveWindowPng(dialog, *session.options.screenshot)
                                   : Status(Error{"The first run's window isn't open."});
       Check(saved.ok(), "screenshot", saved ? ToUtf8(*session.options.screenshot) : saved.error());
       session.failed |= !saved;
+    } else {
+      session.screenshot_taken = true;
+      if (session.options.dialog) {
+        TakeDialogScreenshot();
+      } else {
+        TakeScreenshot();
+      }
+      return;
     }
-    // A scripted run ends with the keys.
-    if (dialog && (session.options.screenshot || !session.options.presses.empty())) {
-      PostMessageW(dialog, WM_CLOSE, 0, 0);
-    }
-    return;
   }
-  if (session.options.dialog) {
-    TakeDialogScreenshot();
-  } else if (session.options.screenshot) {
-    TakeScreenshot();
+  // A scripted run ends with the keys: close what they opened, then quit.
+  if (!session.options.screenshot && session.options.presses.empty()) return;
+  if (dialog) {
+    PostMessageW(dialog, WM_CLOSE, 0, 0);
+  } else if (!session.first_run_opened && !session.ended) {
+    session.ended = true;
+    session.app->Quit();
   }
 }
 
-void WaitToSettle() {
+void WaitToSettle(UINT ms) {
   if (g_session->settle_timer) KillTimer(nullptr, g_session->settle_timer);
-  g_session->settle_timer = SetTimer(nullptr, 0, kSettleMs, OnSettled);
+  g_session->settle_timer = SetTimer(nullptr, 0, ms, OnSettled);
 }
 
 void CALLBACK OnKeys(HWND, UINT, UINT_PTR, DWORD) {
@@ -437,6 +541,113 @@ void TakeDialogScreenshot() {
   g_session->app->Quit();
 }
 
+void CALLBACK OnNotificationStep(HWND, UINT, UINT_PTR timer, DWORD) {
+  KillTimer(nullptr, timer);
+  Session& session = *g_session;
+  session.notice_timer = 0;
+  if (session.ended) return;
+  session.ended = true;
+  if (!session.notice_shown) {
+    Check(false, "screenshot", "No notification came up.");
+    session.failed = true;
+  } else {
+    const RECT area = NotificationArea();
+    const Status saved = SaveScreenPng(area, *session.options.screenshot);
+    Check(saved.ok(), "screenshot",
+          saved ? std::format("{} ({}x{}, the bottom-right corner of the screen)", ToUtf8(*session.options.screenshot),
+                              area.right - area.left, area.bottom - area.top)
+                : saved.error());
+    session.failed |= !saved;
+  }
+  session.app->Quit();
+}
+
+// Waits for a notification, and takes the corner of the screen it shows in
+// once it has slid in. Windows draws it, so Do Not Disturb, or notifications
+// turned off for the app, leave nothing to take.
+void TakeNotificationScreenshot() {
+  Session& session = *g_session;
+  if (session.notice_timer) KillTimer(nullptr, session.notice_timer);
+  UINT wait = kNotificationWaitMs;
+  if (session.notice_shown) {
+    const auto left = std::chrono::ceil<std::chrono::milliseconds>(*session.notice_shown + kNotificationShows -
+                                                                    Clock::now());
+    wait = static_cast<UINT>(std::max<long long>(left.count(), USER_TIMER_MINIMUM));
+  }
+  session.notice_timer = SetTimer(nullptr, 0, wait, OnNotificationStep);
+}
+
+// Each size of the tray icon with each badge, magnified and as it is, on a
+// light and a dark taskbar.
+int SaveIconSheet(const fs::path& file) {
+  const int cell = kIconSizes[std::size(kIconSizes) - 1] * (kIconZoom + 1) + 3 * kMarginPx;
+  const int columns = static_cast<int>(std::size(kIconSizes));
+  constexpr tray::Badge kBadges[] = {tray::Badge::kNone, tray::Badge::kPaused, tray::Badge::kAttention};
+  const int width = columns * cell;
+  const int height = 2 * static_cast<int>(std::size(kBadges)) * cell;
+  std::vector<uint32_t> sheet(static_cast<size_t>(width) * height);
+  const HINSTANCE instance = GetModuleHandleW(nullptr);
+  for (int dark = 0; dark < 2; ++dark) {
+    const uint32_t background = dark ? kDarkTaskbar : kLightTaskbar;
+    for (size_t row = 0; row < std::size(kBadges); ++row) {
+      const int top = (dark * static_cast<int>(std::size(kBadges)) + static_cast<int>(row)) * cell;
+      for (int y = top; y < top + cell; ++y) {
+        std::fill_n(sheet.begin() + static_cast<ptrdiff_t>(y) * width, width, background);
+      }
+      for (int column = 0; column < columns; ++column) {
+        const int size = kIconSizes[column];
+        HICON icon = nullptr;
+        if (FAILED(LoadIconWithScaleDown(instance, MAKEINTRESOURCEW(IDI_KNOBS), size, size, &icon))) continue;
+        auto pixels = tray::ReadIcon(icon);
+        DestroyIcon(icon);
+        if (!pixels) continue;
+        const tray::IconPixels badged = tray::AddBadge(std::move(*pixels), kBadges[row], dark != 0);
+        // Over the background, magnified, then as it is beside it.
+        const auto put = [&](int x, int y, uint32_t pixel) {
+          const float alpha = (pixel >> 24) / 255.0f;
+          uint32_t out = 0xff000000;
+          for (int shift = 0; shift < 24; shift += 8) {
+            const float over = ((pixel >> shift) & 0xff) * alpha + ((background >> shift) & 0xff) * (1 - alpha);
+            out |= static_cast<uint32_t>(std::lround(over)) << shift;
+          }
+          sheet[static_cast<size_t>(y) * width + x] = out;
+        };
+        const int left = column * cell + kMarginPx;
+        for (int y = 0; y < size * kIconZoom; ++y) {
+          for (int x = 0; x < size * kIconZoom; ++x) {
+            put(left + x, top + kMarginPx + y,
+                badged.bgra[static_cast<size_t>(y / kIconZoom) * size + x / kIconZoom]);
+          }
+        }
+        for (int y = 0; y < size; ++y) {
+          for (int x = 0; x < size; ++x) {
+            put(left + size * kIconZoom + kMarginPx + x, top + kMarginPx + y,
+                badged.bgra[static_cast<size_t>(y) * size + x]);
+          }
+        }
+      }
+    }
+  }
+  const Status saved = SavePixelsPng(width, height, sheet, file);
+  Check(saved.ok(), "icons",
+        saved ? std::format("{} (rows: no badge, paused, attention; light taskbar, then dark)", ToUtf8(file))
+              : saved.error());
+  Print(saved ? "PASS\n" : "FAIL\n");
+  return saved ? kExitPass : kExitFail;
+}
+
+const char* BadgeName(tray::Badge badge) {
+  switch (badge) {
+    case tray::Badge::kNone:
+      return "no badge";
+    case tray::Badge::kPaused:
+      return "paused badge";
+    case tray::Badge::kAttention:
+      return "attention badge";
+  }
+  return "";
+}
+
 int Run(const Options& options) {
   Session session;
   g_session = &session;
@@ -445,6 +656,8 @@ int Run(const Options& options) {
   const bool fixture = options.import_args.config_dir.has_value();
   FakeWorld world = fixture ? FixtureWorld() : DefaultWorld();
   options.scenario->setup(world, session.script);
+  // The copy restarted for an update finds the new version.
+  if (options.restarted_for == core::RestartNeed::kObsUpdated) UpdateObs(world);
   session.world = std::make_shared<SharedWorld>(std::move(world));
   session.obs_running = session.script.obs_running;
   Print(std::format("{} tray, {}: {} ({})\n", kDisplayName,
@@ -456,6 +669,9 @@ int Run(const Options& options) {
   tray_options.instance = GetModuleHandleW(nullptr);
   tray_options.window_class = std::format(L"{}.tray-fake", kDisplayNameW);
   if (options.settings) tray_options.settings_file = *options.settings;
+  // Notifications wait for the first run to be finished.
+  tray_options.first_run.done = !options.first_run;
+  tray_options.restarted_for = options.restarted_for;
   tray_options.settings.obs_config = options.import_args.config_dir;
   tray_options.settings.mic = options.import_args.pick;
   if (const auto dirs = GetAppDirs()) tray_options.log_folder = dirs->Logs();
@@ -466,8 +682,10 @@ int Run(const Options& options) {
     Print(std::format("Start with Windows {}\n", on ? "on" : "off"));
     return Status(Ok{});
   };
-  tray_options.restart = [] {
-    Print(std::format("{} would restart now\n", kDisplayName));
+  tray_options.restart = [](core::RestartNeed why) {
+    Print(std::format("{0} would restart now{1}{2}\n", kDisplayName,
+                      why == core::RestartNeed::kNone ? "" : ", and say why: knobs-tray --restarted-for ",
+                      tray::RestartNeedName(why)));
     return Status(Ok{});
   };
   // The real OBS would open the mic.
@@ -501,6 +719,24 @@ int Run(const Options& options) {
     Print(std::format("[{:8.2f} s] {}\n{:13}status: {}\n", seconds, core::DescribeSnapshot(snapshot), "",
                       tray::StatusLine(snapshot)));
     WaitToSettle();
+  };
+  tray_options.on_notice = [](const std::optional<tray::Notice>& notice) {
+    const double seconds = std::chrono::duration<double>(Clock::now() - g_session->start).count();
+    if (!notice) {
+      Print(std::format("[{:8.2f} s] notification taken down\n", seconds));
+      return;
+    }
+    Print(std::format("[{:8.2f} s] notification: {}\n{:13}{}\n{:13}a click opens {}{}\n", seconds, notice->title,
+                      "", notice->text, "",
+                      notice->page ? std::format("the first run's {} page", tray::PageName(*notice->page))
+                                   : std::string("the menu"),
+                      notice->sound ? "" : " (no sound)"));
+    g_session->notice_shown = Clock::now();
+    if (g_session->waiting_for_notice) TakeNotificationScreenshot();
+  };
+  tray_options.on_badge = [](tray::Badge badge) {
+    const double seconds = std::chrono::duration<double>(Clock::now() - g_session->start).count();
+    Print(std::format("[{:8.2f} s] icon: {}\n", seconds, BadgeName(badge)));
   };
 
   auto app = tray::TrayApp::Create(std::move(tray_options));
@@ -540,7 +776,7 @@ int wmain(int argc, wchar_t** argv) {
     Print(std::format("Couldn't initialize COM (0x{:08X}).\n", static_cast<uint32_t>(com)));
     return kExitFail;
   }
-  const int code = Run(*options);
+  const int code = options->icons ? SaveIconSheet(*options->icons) : Run(*options);
   CoUninitialize();
   return code;
 }

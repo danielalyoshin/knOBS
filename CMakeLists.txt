@@ -61,10 +61,12 @@ configure_file(src/version.h.in ${CMAKE_CURRENT_BINARY_DIR}/generated/version.h 
 # The tray app's UI, run by knobs.exe, and by knobs-tray on a fake core.
 add_library(knobs_tray STATIC
   src/tray/autostart.cpp
+  src/tray/badge.cpp
   src/tray/first_run.cpp
   src/tray/first_run_dialog.cpp
   src/tray/menu.cpp
   src/tray/menu_theme.cpp
+  src/tray/notices.cpp
   src/tray/open_obs.cpp
   src/tray/settings_file.cpp
   src/tray/single_instance.cpp
@@ -113,18 +115,22 @@ target_link_libraries(knobs-compare PRIVATE knobs_tools)
 add_executable(knobs-core tools/core/core_main.cpp)
 target_link_libraries(knobs-core PRIVATE knobs_tools ole32 psapi)
 
+# The fake core's made-up OBS and devices, for knobs-tray and the unit tests.
+add_library(knobs_tray_fake STATIC tools/tray/fake_backend.cpp)
+target_link_libraries(knobs_tray_fake PUBLIC knobs_tray knobs_tools)
+
 add_executable(knobs-tray
   tools/tray/tray_main.cpp
-  tools/tray/fake_backend.cpp
   tools/tray/screenshot.cpp
   tools/tray/knobs-tray.rc
   src/tray/knobs.manifest
 )
 target_include_directories(knobs-tray PRIVATE assets)
-target_link_libraries(knobs-tray PRIVATE knobs_tray knobs_tools dwmapi ole32 windowscodecs)
+target_link_libraries(knobs-tray PRIVATE knobs_tray_fake dwmapi ole32 windowscodecs)
 
-add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp)
-target_link_libraries(knobs-tests PRIVATE knobs_tools knobs_tray delayimp)
+add_executable(knobs-tests tests/unit_tests.cpp tests/core_tests.cpp tests/tray_tests.cpp tests/first_run_tests.cpp
+                           tests/notices_tests.cpp)
+target_link_libraries(knobs-tests PRIVATE knobs_tray_fake delayimp)
 # Gives the test binary a delay-load import for the PE parser tests to find.
 target_link_options(knobs-tests PRIVATE /DELAYLOAD:version.dll)
 

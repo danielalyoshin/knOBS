@@ -156,8 +156,9 @@ void Controller::Refresh() {
   obs_install_ = {};
   profile_cable_id_.clear();
   profile_cable_name_.clear();
-  const auto fail = [this](State state, std::string detail, SetupNeed setup = SetupNeed::kNone) {
-    problem_ = Problem{state, std::move(detail), setup};
+  const auto fail = [this](State state, std::string detail, SetupNeed setup = SetupNeed::kNone,
+                           RestartNeed restart = RestartNeed::kNone) {
+    problem_ = Problem{state, std::move(detail), setup, restart};
   };
 
   const ObsCheck obs = backend_.CheckObs(settings_);
@@ -166,9 +167,10 @@ void Controller::Refresh() {
   if (obs.found == ObsFound::kUnsupported) return fail(State::kObsUnsupported, obs.message);
   // libobs stays loaded until the process ends (runtime::ObsRuntime).
   if (libobs_ && obs.install.version != libobs_->version) {
-    return fail(State::kRestartNeeded, std::format("OBS was updated from {} to {}. {} has to restart to use it.",
-                                                   libobs_->version.ToString(), obs.install.version.ToString(),
-                                                   kDisplayName));
+    return fail(State::kRestartNeeded,
+                std::format("OBS was updated from {} to {}. {} has to restart to use it.",
+                            libobs_->version.ToString(), obs.install.version.ToString(), kDisplayName),
+                SetupNeed::kNone, RestartNeed::kObsUpdated);
   }
   auto config = backend_.ReadObsConfig(settings_, obs.install);
   if (!config) return fail(State::kNeedsSetup, config.error(), SetupNeed::kObsSettings);
@@ -185,7 +187,8 @@ void Controller::Refresh() {
                 std::format("The OBS profile's audio changed from {} Hz {} to {} Hz {}. {} has to restart to follow "
                             "it, as OBS does.",
                             libobs_->sample_rate, libobs_->channel_setup, audio.sample_rate, audio.channel_setup,
-                            kDisplayName));
+                            kDisplayName),
+                SetupNeed::kNone, RestartNeed::kAudioChanged);
   }
 
   auto imported = backend_.ImportMic(*config, settings_.mic);
@@ -270,6 +273,7 @@ Snapshot Controller::Decide(Clock::time_point now) const {
   if (problem_) {
     set(problem_->state, problem_->detail);
     next.setup = problem_->setup;
+    next.restart = problem_->restart;
   } else if (chain_error_) {
     set(State::kFailed, *chain_error_);
   } else if (paused_by_user_) {

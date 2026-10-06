@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <array>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -13,15 +14,20 @@
 
 #include "core/core.h"
 #include "core/state.h"
+#include "tray/badge.h"
 #include "tray/first_run.h"
 #include "tray/first_run_dialog.h"
 #include "tray/menu.h"
 #include "tray/menu_theme.h"
+#include "tray/notices.h"
 #include "util/result.h"
 
 // The tray icon and its menu (plan.md, Tray and first run). It runs the core
 // and shows its state: the icon's tooltip and the menu's first line are the
-// status line, and the menu offers the fix for whatever needs the user.
+// status line, the icon's badge says whether knobs is paused or needs the
+// user, and the menu offers the fix for whatever needs the user.
+// Notifications (Notifier) say what changed, and a click on one opens its
+// fix.
 namespace knobs::tray {
 
 struct TrayOptions {
@@ -33,23 +39,32 @@ struct TrayOptions {
   // tray starting for good (knobs-tray does that to show the state).
   std::function<Result<std::unique_ptr<core::Core>>(core::Observer& observer, const core::Settings& settings)>
       start_core;
-  // Where the settings are kept. Empty: `settings` is used and nothing is
-  // saved.
+  // Where the settings are kept. Empty: `settings` and `first_run` are used
+  // and nothing is saved.
   std::filesystem::path settings_file;
   core::Settings settings;
+  FirstRunProgress first_run;
   // Opens the first run once the tray runs, unless it was finished before.
   bool open_first_run = false;
   // Start with Windows.
   std::function<bool()> starts_with_windows;
   std::function<Status(bool on)> set_start_with_windows;
-  // Starts a new copy, which waits for this one to quit.
-  std::function<Status()> restart;
+  // Starts a new copy, which waits for this one to quit, and says why. The
+  // tray restarts by itself when the core needs it to follow OBS.
+  std::function<Status(core::RestartNeed why)> restart;
+  // Why the copy before this one restarted it, if it did.
+  core::RestartNeed restarted_for = core::RestartNeed::kNone;
   // Starts OBS from its install, for the first run. Default: OpenObs.
   std::function<Status(const std::filesystem::path& install_root)> open_obs;
   std::filesystem::path log_folder;
   MenuTheme theme = MenuTheme::kSystem;
   // Hears each snapshot on the tray's thread, after the tray has.
   std::function<void(const core::Snapshot& snapshot)> on_snapshot;
+  // Hears each notification as it's shown, and nullopt as one is taken
+  // down, on the tray's thread.
+  std::function<void(const std::optional<Notice>& notice)> on_notice;
+  // Hears the icon's badge change.
+  std::function<void(Badge badge)> on_badge;
 };
 
 class TrayApp final : public core::Observer, private FirstRunHost {
@@ -72,6 +87,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   void ShowMenu(POINT point);
   // Carries out a menu command as if it had been picked.
   void Execute(unsigned id);
+  // Opens what the notification showing offers, as a click on it does.
+  void OpenNotice();
   // Opens the first run, or brings it forward, and returns once it's
   // closed. Unfinished, it resumes where it stopped; finished, it starts
   // over if `from_start`, and otherwise shows only what the state needs.
@@ -91,8 +108,25 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wparam, LPARAM lparam);
   LRESULT HandleMessage(UINT message, WPARAM wparam, LPARAM lparam);
 
+  // The icons with each badge, for the tray and for notifications, in
+  // colors for the taskbar.
+  void LoadIcons();
+  void DestroyIcons();
   void AddIcon();
+  // Shows the icon with the badge it has.
+  void SetIcon();
   void UpdateTip();
+  void UpdateBadge();
+  // Shows or takes down a notification, then updates the badge and the
+  // timer for what's due next.
+  void Notify(const Notifier::Update& update);
+  void ShowBalloon(const Notice& notice);
+  void HideBalloon();
+  // The first run shows the state while it's unfinished or open.
+  bool Quiet() const;
+  // Restarts to follow OBS, when the core needs it and nothing's open.
+  // Returns whether this copy is quitting.
+  bool RestartByItself();
   POINT IconPoint() const;
   void Execute(unsigned id, const Menu& menu);
   void Save();
@@ -116,7 +150,10 @@ class TrayApp final : public core::Observer, private FirstRunHost {
 
   TrayOptions options_;
   HWND window_ = nullptr;
-  HICON icon_ = nullptr;
+  // By Badge: small for the tray, large for notifications.
+  std::array<HICON, 3> icons_ = {};
+  std::array<HICON, 3> large_icons_ = {};
+  Badge badge_ = Badge::kNone;
   UINT taskbar_created_ = 0;
   bool icon_added_ = false;
   bool running_ = false;  // In Run.
@@ -127,6 +164,8 @@ class TrayApp final : public core::Observer, private FirstRunHost {
   core::Snapshot snapshot_;
   std::unique_ptr<core::Core> core_;
   FirstRunDialog* first_run_dialog_ = nullptr;  // While it's open.
+  Notifier notifier_;
+  bool restart_tried_ = false;  // While the core needs a restart.
 
   std::mutex pending_mutex_;  // Guards pending_.
   std::optional<core::Snapshot> pending_;

@@ -6,6 +6,8 @@
 #include <shellapi.h>
 #include <windowsx.h>
 
+#include <algorithm>
+#include <chrono>
 #include <format>
 #include <system_error>
 #include <utility>
@@ -27,6 +29,11 @@ constexpr UINT kTrayMessage = WM_APP + 1;      // From the icon (NOTIFYICON_VERS
 constexpr UINT kSnapshotMessage = WM_APP + 2;  // OnSnapshot left one in pending_.
 constexpr UINT kActivateMessage = WM_APP + 3;  // Another copy was started (ActivateTray).
 constexpr UINT kFirstRunMessage = WM_APP + 4;  // Open the unfinished first run.
+constexpr UINT_PTR kNoticeTimer = 1;           // Notifier::NextDeadline.
+
+using Clock = Notifier::Clock;
+
+constexpr Badge kBadges[] = {Badge::kNone, Badge::kPaused, Badge::kAttention};
 
 // Creates the native menu for `items`.
 HMENU CreateNativeMenu(const std::vector<MenuItem>& items) {
@@ -59,6 +66,18 @@ HICON LoadAppIcon(HINSTANCE instance, int size) {
   HICON icon = nullptr;
   if (FAILED(LoadIconMetric(instance, MAKEINTRESOURCEW(IDI_KNOBS), size, &icon))) return nullptr;
   return icon;
+}
+
+// Copies `text` into a NOTIFYICONDATAW field, shortened with "…" to fit.
+template <size_t N>
+void CopyField(wchar_t (&field)[N], std::string_view text) {
+  std::wstring wide = FromUtf8(text);
+  if (wide.size() >= N) {
+    wide.resize(N - 2);
+    wide += L'…';
+  }
+  wide.copy(field, wide.size());
+  field[wide.size()] = L'\0';
 }
 
 // A task dialog with a Close button, owned by nobody so that it gets a
@@ -113,7 +132,7 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   }
   app->taskbar_created_ = RegisterWindowMessageW(L"TaskbarCreated");
   if (app->taskbar_created_) ChangeWindowMessageFilterEx(app->window_, app->taskbar_created_, MSGFLT_ALLOW, nullptr);
-  app->icon_ = LoadAppIcon(opts.instance, LIM_SMALL);
+  app->LoadIcons();
   ApplyMenuTheme(opts.theme);
   app->AddIcon();
 
@@ -129,11 +148,15 @@ Result<std::unique_ptr<TrayApp>> TrayApp::Create(TrayOptions options) {
   return app;
 }
 
-TrayApp::TrayApp(TrayOptions options) : options_(std::move(options)), settings_(options_.settings) {}
+TrayApp::TrayApp(TrayOptions options)
+    : options_(std::move(options)),
+      settings_(options_.settings),
+      first_run_(options_.first_run),
+      notifier_({.restarted_for = options_.restarted_for}) {}
 
 TrayApp::~TrayApp() {
   Quit();
-  if (icon_) DestroyIcon(icon_);
+  DestroyIcons();
 }
 
 int TrayApp::Run() {
@@ -193,10 +216,7 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
     data.uID = kIconId;
     Shell_NotifyIconW(NIM_DELETE, &data);
     icon_added_ = false;
-    if (const HICON icon = LoadAppIcon(options_.instance, LIM_SMALL)) {
-      if (icon_) DestroyIcon(icon_);
-      icon_ = icon;
-    }
+    LoadIcons();
     AddIcon();
     return 0;
   }
@@ -212,6 +232,9 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
             ShowMenu({GET_X_LPARAM(wparam), GET_Y_LPARAM(wparam)});
           }
           break;
+        case NIN_BALLOONUSERCLICK:
+          OpenNotice();
+          break;
         default:
           break;
       }
@@ -225,11 +248,18 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (snapshot) {
         const core::Snapshot before = std::exchange(snapshot_, std::move(*snapshot));
         UpdateTip();
+        if (RestartByItself()) return 0;
         if (first_run_dialog_) first_run_dialog_->Changed(before);
+        Notify(notifier_.Changed(snapshot_, Quiet(), Clock::now()));
         if (options_.on_snapshot) options_.on_snapshot(snapshot_);
       }
       return 0;
     }
+    case WM_TIMER:
+      if (wparam != kNoticeTimer) break;
+      KillTimer(window_, kNoticeTimer);
+      Notify(notifier_.Tick(Quiet(), Clock::now()));
+      return 0;
     case kActivateMessage:
       if (const HWND dialog = OpenDialog()) {
         SetForegroundWindow(dialog);
@@ -247,6 +277,9 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
       if (wparam == SPI_SETHIGHCONTRAST ||
           (lparam && std::wstring_view(reinterpret_cast<const wchar_t*>(lparam)) == L"ImmersiveColorSet")) {
         ApplyMenuTheme(options_.theme);
+        // The badges' colors follow the taskbar.
+        LoadIcons();
+        SetIcon();
       }
       break;
     case WM_QUERYENDSESSION:
@@ -270,13 +303,36 @@ LRESULT TrayApp::HandleMessage(UINT message, WPARAM wparam, LPARAM lparam) {
   return DefWindowProcW(window_, message, wparam, lparam);
 }
 
+void TrayApp::LoadIcons() {
+  DestroyIcons();
+  const bool dark = options_.theme == MenuTheme::kDark ||
+                    (options_.theme == MenuTheme::kSystem && WindowsModeIsDark());
+  const HICON small = LoadAppIcon(options_.instance, LIM_SMALL);
+  const HICON large = LoadAppIcon(options_.instance, LIM_LARGE);
+  for (const Badge badge : kBadges) {
+    icons_[static_cast<size_t>(badge)] = BadgedIcon(small, badge, dark);
+    large_icons_[static_cast<size_t>(badge)] = BadgedIcon(large, badge, dark);
+  }
+  if (small) DestroyIcon(small);
+  if (large) DestroyIcon(large);
+}
+
+void TrayApp::DestroyIcons() {
+  for (std::array<HICON, 3>* icons : {&icons_, &large_icons_}) {
+    for (HICON& icon : *icons) {
+      if (icon) DestroyIcon(icon);
+      icon = nullptr;
+    }
+  }
+}
+
 void TrayApp::AddIcon() {
   NOTIFYICONDATAW data = {sizeof(data)};
   data.hWnd = window_;
   data.uID = kIconId;
   data.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
   data.uCallbackMessage = kTrayMessage;
-  data.hIcon = icon_;
+  data.hIcon = icons_[static_cast<size_t>(badge_)];
   // Fails while Explorer is starting, at sign-in; TaskbarCreated comes once
   // it's up.
   if (!Shell_NotifyIconW(NIM_ADD, &data)) return;
@@ -299,6 +355,79 @@ void TrayApp::UpdateTip() {
   }
   tip.copy(data.szTip, tip.size());
   Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void TrayApp::SetIcon() {
+  if (!icon_added_) return;
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.hWnd = window_;
+  data.uID = kIconId;
+  data.uFlags = NIF_ICON;
+  data.hIcon = icons_[static_cast<size_t>(badge_)];
+  Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void TrayApp::UpdateBadge() {
+  const Badge badge = notifier_.badge();
+  if (badge == badge_) return;
+  badge_ = badge;
+  SetIcon();
+  if (options_.on_badge) options_.on_badge(badge_);
+}
+
+void TrayApp::Notify(const Notifier::Update& update) {
+  if (update.show) {
+    ShowBalloon(*update.show);
+  } else if (update.hide) {
+    HideBalloon();
+  }
+  if ((update.show || update.hide) && options_.on_notice) options_.on_notice(update.show);
+  UpdateBadge();
+  KillTimer(window_, kNoticeTimer);
+  if (const auto next = notifier_.NextDeadline()) {
+    const auto wait = std::chrono::ceil<std::chrono::milliseconds>(*next - Clock::now()).count();
+    SetTimer(window_, kNoticeTimer, static_cast<UINT>(std::clamp<long long>(wait, USER_TIMER_MINIMUM, 60'000)),
+             nullptr);
+  }
+}
+
+void TrayApp::ShowBalloon(const Notice& notice) {
+  if (!icon_added_) return;
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.hWnd = window_;
+  data.uID = kIconId;
+  data.uFlags = NIF_INFO;
+  CopyField(data.szInfoTitle, notice.title);
+  CopyField(data.szInfo, notice.text);
+  // The knob, with the badge for a problem, rather than one of Windows'
+  // icons.
+  data.dwInfoFlags = NIIF_USER | NIIF_LARGE_ICON | (notice.sound ? 0u : NIIF_NOSOUND);
+  data.hBalloonIcon = large_icons_[static_cast<size_t>(notice.problem ? Badge::kAttention : Badge::kNone)];
+  Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+void TrayApp::HideBalloon() {
+  if (!icon_added_) return;
+  // An empty text takes it down.
+  NOTIFYICONDATAW data = {sizeof(data)};
+  data.hWnd = window_;
+  data.uID = kIconId;
+  data.uFlags = NIF_INFO;
+  Shell_NotifyIconW(NIM_MODIFY, &data);
+}
+
+bool TrayApp::Quiet() const { return !first_run_.done || first_run_dialog_ != nullptr; }
+
+bool TrayApp::RestartByItself() {
+  if (snapshot_.state != core::State::kRestartNeeded) {
+    restart_tried_ = false;
+    return false;
+  }
+  if (restart_tried_ || in_menu_ || quitting_ || OpenDialog()) return false;
+  // Once: if it fails, the menu and the first run offer it.
+  restart_tried_ = true;
+  Restart();
+  return quitting_;
 }
 
 POINT TrayApp::IconPoint() const {
@@ -329,11 +458,24 @@ void TrayApp::ShowMenu(POINT point) {
   DestroyMenu(native);
   in_menu_ = false;
   if (id != 0) Execute(id, menu);
+  RestartByItself();
 }
 
 void TrayApp::Execute(unsigned id) {
   const bool starts = options_.starts_with_windows && options_.starts_with_windows();
   Execute(id, BuildMenu(snapshot_, settings_, starts));
+}
+
+void TrayApp::OpenNotice() {
+  const std::optional<Notice> notice = notifier_.shown();
+  notifier_.Clicked();
+  if (notice && notice->page) {
+    ShowFirstRun(false, notice->page);
+  } else if (const HWND dialog = OpenDialog()) {
+    SetForegroundWindow(dialog);
+  } else {
+    ShowMenu(IconPoint());
+  }
 }
 
 void TrayApp::Execute(unsigned id, const Menu& menu) {
@@ -406,6 +548,7 @@ void TrayApp::ShowFirstRun(bool from_start, std::optional<FirstRunPage> page) {
   first_run_dialog_ = &dialog;
   dialog.Show();
   first_run_dialog_ = nullptr;
+  RestartByItself();
 }
 
 void TrayApp::ApplySettings(const core::Settings& settings) {
@@ -468,7 +611,7 @@ void TrayApp::OpenLogFolder() {
 
 void TrayApp::Restart() {
   if (!options_.restart) return;
-  if (const Status started = options_.restart(); !started) {
+  if (const Status started = options_.restart(snapshot_.restart); !started) {
     ShowError(started.error());
     return;
   }

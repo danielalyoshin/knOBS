@@ -5,6 +5,7 @@
 #include <wincodec.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <format>
 #include <string_view>
 
@@ -110,6 +111,35 @@ Status SaveScreenPng(const RECT& rect, const std::filesystem::path& file) {
                         : Status(Error{std::format("Couldn't copy the screen: {}", DescribeWinError(GetLastError()))});
   DeleteObject(bitmap);
   return saved;
+}
+
+Status SavePixelsPng(int width, int height, const std::vector<uint32_t>& bgra, const std::filesystem::path& file) {
+  if (width <= 0 || height <= 0 || bgra.size() != static_cast<size_t>(width) * height) {
+    return Error{"There's nothing to take a picture of."};
+  }
+  BITMAPINFO format = {};
+  format.bmiHeader.biSize = sizeof(format.bmiHeader);
+  format.bmiHeader.biWidth = width;
+  format.bmiHeader.biHeight = -height;  // Top-down.
+  format.bmiHeader.biPlanes = 1;
+  format.bmiHeader.biBitCount = 32;
+  format.bmiHeader.biCompression = BI_RGB;
+  void* bits = nullptr;
+  const HBITMAP bitmap = CreateDIBSection(nullptr, &format, DIB_RGB_COLORS, &bits, nullptr, 0);
+  if (!bitmap) return Error{"Couldn't make a bitmap for the picture."};
+  std::copy(bgra.begin(), bgra.end(), static_cast<uint32_t*>(bits));
+  Status saved = SavePng(bitmap, file);
+  DeleteObject(bitmap);
+  return saved;
+}
+
+RECT NotificationArea() {
+  MONITORINFO monitor = {sizeof(monitor)};
+  GetMonitorInfoW(MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY), &monitor);
+  const RECT work = monitor.rcWork;
+  // In pixels at 96 DPI: a notification is 364 wide, with a margin.
+  const int scale = static_cast<int>(GetDpiForSystem());
+  return {work.right - MulDiv(400, scale, 96), work.bottom - MulDiv(300, scale, 96), work.right, work.bottom};
 }
 
 Status SaveWindowPng(HWND window, const std::filesystem::path& file) {
