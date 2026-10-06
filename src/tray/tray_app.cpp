@@ -618,7 +618,10 @@ void TrayApp::ShowAbout() {
 }
 
 void TrayApp::ShowError(std::string_view text) {
-  ShowMessageDialog(options_.instance, {.icon = TD_WARNING_ICON, .content = FromUtf8(text)});
+  // Over the first run while it's open, which keeps its buttons from being
+  // clicked again while the error is up: a button's handler may be why.
+  const HWND owner = first_run_dialog_ ? first_run_dialog_->window() : nullptr;
+  ShowMessageDialog(options_.instance, {.owner = owner, .icon = TD_WARNING_ICON, .content = FromUtf8(text)});
 }
 
 HWND TrayApp::OpenDialog() const {

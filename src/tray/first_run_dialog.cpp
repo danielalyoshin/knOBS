@@ -100,6 +100,9 @@ HRESULT CALLBACK FirstRunDialog::Callback(HWND window, UINT notification, WPARAM
 }
 
 HRESULT FirstRunDialog::OnButton(int id) {
+  // One click at a time: a handler's own dialog (an error, a folder picker)
+  // runs a message loop that could hand the window another.
+  if (in_button_) return S_FALSE;
   // The close button, Esc and Alt+F4: knobs stays in the tray, and the first
   // run resumes here next time.
   if (id == IDCANCEL) return S_OK;
