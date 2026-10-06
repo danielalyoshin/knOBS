@@ -749,14 +749,22 @@ TEST(ObsBackendKeepsToAPickedSettingsFolder) {
     WriteFile(root / L"obs-studio" / L"basic" / L"profiles" / profile / L"basic.ini", "");
   };
   ObsBackend backend({});
+  constexpr std::string_view kOpenObs = "Open OBS once and close it.";
+  // Before OBS has run, opening it once is the fix for its own folder,
+  // picked or not, but not for a folder elsewhere, which OBS doesn't fill.
+  const Settings wrong{.obs_config = dir.path / L"wrong"};
+  const auto unopened = backend.ReadObsConfig({.obs_config = install.root / L"config"}, install);
+  CHECK(!unopened.ok() && unopened.error().find(kOpenObs) != std::string::npos);
+  auto config = backend.ReadObsConfig(wrong, install);
+  CHECK(!config.ok() && config.error().find(kOpenObs) == std::string::npos);
   // OBS's own settings, made by opening and closing it.
   write_settings(install.root / L"config", L"Own");
   CHECK(backend.ReadObsConfig({}, install).ok() && backend.ReadObsConfig({}, install)->profile == "Own");
   // The wrong folder picked: its error shows, not OBS's own settings, until
   // the user picks another or goes back to OBS's own.
-  const Settings wrong{.obs_config = dir.path / L"wrong"};
-  const auto config = backend.ReadObsConfig(wrong, install);
-  CHECK(!config.ok() && config.error().find("\\wrong\\obs-studio") != std::string::npos);
+  config = backend.ReadObsConfig(wrong, install);
+  CHECK(!config.ok() && config.error() == std::format("OBS has no settings in {}.",
+                                                      ToUtf8(dir.path / L"wrong" / L"obs-studio")));
   // A picked folder that can be read comes first.
   write_settings(dir.path / L"picked", L"Picked");
   const auto picked = backend.ReadObsConfig({.obs_config = dir.path / L"picked"}, install);

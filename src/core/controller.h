@@ -124,6 +124,7 @@ class Controller {
   // From the last Refresh.
   std::optional<Problem> problem_;
   runtime::ObsInstall obs_install_;
+  std::filesystem::path own_obs_config_;
   std::optional<Libobs> libobs_;
   // libobs failed to start, and can't start again in this process
   // (Backend::LibobsCanRetry).

@@ -559,10 +559,22 @@ TEST(ConfigUsesExistingLocationsOnly) {
   CHECK(!import::FindActiveObsConfig({dir.path, true}).ok());
 }
 
+TEST(SameFolderComparesAsWindowsDoes) {
+  CHECK(import::SameFolder(L"C:\\Users\\you\\AppData\\Roaming", L"c:\\users\\YOU\\appdata\\roaming\\"));
+  CHECK(import::SameFolder(L"E:/Portable/config", L"E:\\Portable\\config"));
+  CHECK(import::SameFolder(L"E:\\Portable\\obs\\..\\config", L"E:\\Portable\\config"));
+  CHECK(!import::SameFolder(L"E:\\Portable\\config", L"E:\\Portable\\config2"));
+  CHECK(!import::SameFolder(L"E:\\Portable\\config", L""));
+  CHECK(!import::SameFolder(L"", L""));
+}
+
 TEST(ConfigReportsWhatsMissing) {
   TempDir dir(L"missing");
   auto none = import::FindActiveObsConfig({dir.path, false});
   CHECK(!none.ok() && none.error().find("Open OBS once and close it.") != std::string::npos);
+  // A folder OBS doesn't keep its settings in: opening OBS wouldn't fill it.
+  none = import::FindActiveObsConfig({dir.path, false}, false);
+  CHECK(!none.ok() && none.error().ends_with("obs-studio.") && none.error().find("Open OBS") == std::string::npos);
   WriteObsConfig(dir.path, {{"global.ini", ""}, {"user.ini", "[Basic]\nProfile=Gone\nSceneCollection=C\n"}});
   auto gone = import::FindActiveObsConfig({dir.path, false});
   CHECK(!gone.ok() && gone.error().find("\"Gone\"") != std::string::npos);

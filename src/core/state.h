@@ -110,8 +110,8 @@ struct ChainSummary {
 // the tray menu and tooltip use, "Mic/Aux › 2 filters › CABLE In 16ch".
 std::string FormatChain(const ChainSummary& chain, bool short_form);
 
-// Where else OBS is open (Snapshot::other_obs): "Alex's Windows account",
-// "another Windows account" or "2 other Windows accounts".
+// Where else OBS is open (Snapshot::other_obs): "Alex's account", "another
+// Windows account" or "2 other Windows accounts".
 std::string DescribeOtherObs(const std::vector<std::string>& accounts);
 
 struct Snapshot {
@@ -150,6 +150,9 @@ struct Snapshot {
   std::string default_input;
   // The OBS install, once found, even if its version isn't supported.
   runtime::ObsInstall obs;
+  // Where that OBS keeps its settings, when known. The first run tells a
+  // picked settings folder that's OBS's own from one elsewhere by it.
+  std::filesystem::path own_obs_config;
   // The settings this snapshot was worked out with. They lag behind new
   // ones for as long as the core takes to apply them.
   Settings settings;

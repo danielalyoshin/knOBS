@@ -470,21 +470,31 @@ TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
   CHECK(!FindButton(view, kButtonLookForObs));
 
   // The same for OBS's settings: pick another folder, or use OBS's own.
+  // Opening OBS wouldn't fill a folder elsewhere, so it isn't offered.
   snapshot.state = State::kNeedsSetup;
   snapshot.setup = SetupNeed::kObsSettings;
   snapshot.obs = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
+  snapshot.own_obs_config = "C:\\Users\\you\\AppData\\Roaming";
+  snapshot.detail = "OBS has no settings in E:\\Portable\\config\\obs-studio.";
   snapshot.settings.obs_config = "E:\\Portable\\config";
   first_run = ObsUser(snapshot);
   view = first_run.View(snapshot);
   CHECK(view.page == Page::kObsSettings && Contains(view.content, "aren't in the folder chosen for them."));
-  CHECK(Texts(view.buttons) ==
-        (std::vector<std::string>{"Back", "Choose folder…", "Use OBS's own folder", "Open OBS"}));
-  CHECK(view.default_button == kButtonChooseObsSettings);
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Choose folder…", "Use OBS's own folder"}));
+  CHECK(view.default_button == kButtonChooseObsSettings && view.footer.empty());
   action = first_run.Click(kButtonOwnObsSettings, 0, false, snapshot);
   CHECK(action.kind == Kind::kApply && !action.settings.obs_config);
+  // OBS's own folder picked, however it's spelled: as with no pick, where
+  // opening OBS once does fill it.
+  for (const char* own : {"C:\\Users\\you\\AppData\\Roaming", "c:\\users\\YOU\\appdata\\roaming\\"}) {
+    snapshot.settings.obs_config = own;
+    view = ObsUser(snapshot).View(snapshot);
+    CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Choose folder…", "Open OBS"}));
+    CHECK(view.default_button == kButtonOpenObs && Contains(view.content, "If your OBS keeps its settings"));
+  }
   snapshot.settings.obs_config.reset();
   view = ObsUser(snapshot).View(snapshot);
-  CHECK(!FindButton(view, kButtonOwnObsSettings));
+  CHECK(!FindButton(view, kButtonOwnObsSettings) && FindButton(view, kButtonOpenObs));
 }
 
 // --- The second door ----------------------------------------------------------------

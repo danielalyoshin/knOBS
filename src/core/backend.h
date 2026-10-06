@@ -25,6 +25,9 @@ struct ObsCheck {
   ObsFound found = ObsFound::kMissing;
   runtime::ObsInstall install;  // Unless missing.
   std::string message;          // Why not, unless found.
+  // Where that OBS keeps its settings (import::FindObsConfigRoot), unless
+  // missing or unknown.
+  std::filesystem::path own_config;
 };
 
 struct MicImport {

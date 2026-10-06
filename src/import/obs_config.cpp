@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #include "import/obs_config.h"
 
+#include <windows.h>
+
 #include <array>
 #include <cstdlib>
 #include <format>
@@ -103,11 +105,25 @@ fs::path SettingsFolderFor(const fs::path& folder) {
   return path;
 }
 
-Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
+bool SameFolder(const fs::path& a, const fs::path& b) {
+  if (a.empty() || b.empty()) return false;
+  const auto plain = [](const fs::path& path) {
+    std::wstring text = path.lexically_normal().native();
+    while (text.size() > 3 && (text.back() == L'\\' || text.back() == L'/')) text.pop_back();
+    return text;
+  };
+  const std::wstring x = plain(a);
+  const std::wstring y = plain(b);
+  return CompareStringOrdinal(x.data(), static_cast<int>(x.size()), y.data(), static_cast<int>(y.size()), TRUE) ==
+         CSTR_EQUAL;
+}
+
+Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root, bool obs_writes_here) {
+  const std::string_view open_obs = obs_writes_here ? " Open OBS once and close it." : "";
   const fs::path global_file = root.path / L"obs-studio" / L"global.ini";
   if (!Exists(global_file)) {
-    return Error{std::format("OBS has no settings in {} yet. Open OBS once and close it.",
-                             ToUtf8(root.path / L"obs-studio"))};
+    return Error{std::format("OBS has no settings in {}{}.{}", ToUtf8(root.path / L"obs-studio"),
+                             obs_writes_here ? " yet" : "", open_obs)};
   }
   auto global = ObsIni::Read(global_file);
   if (!global) return Error{global.error()};
@@ -128,8 +144,8 @@ Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root) {
   const auto profile = settings.Get("Basic", "Profile");
   const auto collection = settings.Get("Basic", "SceneCollection");
   if (!profile || profile->empty() || !collection || collection->empty()) {
-    return Error{std::format("{} doesn't name an active profile and scene collection. Open OBS once and close it.",
-                             ToUtf8(config.settings_file))};
+    return Error{std::format("{} doesn't name an active profile and scene collection.{}", ToUtf8(config.settings_file),
+                             open_obs)};
   }
   config.profile = *profile;
   config.collection = *collection;

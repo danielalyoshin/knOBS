@@ -35,6 +35,10 @@ ObsConfigRoot ObsConfigRootAt(const std::filesystem::path& folder);
 // obs-studio\, or, when they picked obs-studio\ itself, the one above it.
 std::filesystem::path SettingsFolderFor(const std::filesystem::path& folder);
 
+// Whether two folders are the same as Windows names them: ignoring case and
+// a trailing separator. An empty path matches nothing.
+bool SameFolder(const std::filesystem::path& a, const std::filesystem::path& b);
+
 // A profile's [Audio] settings in basic.ini, with the defaults OBS uses for
 // missing keys (OBSBasic.cpp, InitBasicConfigDefaults).
 struct ProfileAudio {
@@ -62,8 +66,10 @@ struct ActiveObsConfig {
 
 // Finds the active profile and reads its audio settings. The scene
 // collection is only named here: finding its file means reading JSON (see
-// FindSceneCollectionFile).
-Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root);
+// FindSceneCollectionFile). `obs_writes_here` says that OBS keeps its
+// settings in `root`, so that opening it once fills what's missing; the
+// errors suggest that only then.
+Result<ActiveObsConfig> FindActiveObsConfig(const ObsConfigRoot& root, bool obs_writes_here = true);
 
 // A scene collection file's saved "name", or "" if it has none or doesn't
 // parse.

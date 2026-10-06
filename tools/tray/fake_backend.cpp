@@ -7,6 +7,7 @@
 #include "app_info.h"
 #include "runtime/obs_version.h"
 #include "tray/menu.h"
+#include "util/win_strings.h"
 
 namespace knobs::tools {
 namespace {
@@ -88,6 +89,7 @@ FakeWorld DefaultWorld() {
   FakeWorld world;
   world.obs.found = core::ObsFound::kYes;
   world.obs.install = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
+  world.obs.own_config = "C:\\Users\\you\\AppData\\Roaming";
   world.config.profile = "Untitled";
   world.config.collection = "Untitled";
   world.config.audio.monitoring_device_id = kCable16Id;
@@ -267,9 +269,17 @@ core::ObsCheck FakeBackend::CheckObs(const core::Settings&) {
   return world.obs;
 }
 
-Result<import::ActiveObsConfig> FakeBackend::ReadObsConfig(const core::Settings&, const runtime::ObsInstall&) {
+Result<import::ActiveObsConfig> FakeBackend::ReadObsConfig(const core::Settings& settings,
+                                                           const runtime::ObsInstall&) {
   const FakeWorld world = world_->Get();
-  if (world.config_error) return Error{*world.config_error};
+  if (world.config_error) {
+    // As ObsBackend says it: opening OBS only fills the folder it keeps its
+    // settings in.
+    if (settings.obs_config && !import::SameFolder(*settings.obs_config, world.obs.own_config)) {
+      return Error{std::format("OBS has no settings in {}.", ToUtf8(*settings.obs_config / L"obs-studio"))};
+    }
+    return Error{*world.config_error};
+  }
   return world.config;
 }
 
