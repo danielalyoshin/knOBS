@@ -50,13 +50,9 @@ ObsBackend::~ObsBackend() {
 
 ObsCheck ObsBackend::CheckObs(const Settings& settings) {
   ObsCheck check;
+  // A picked folder OBS has gone from stays the user's to change: the first
+  // run offers to pick another or to look for OBS as with no pick.
   auto install = settings.obs_dir ? runtime::InspectObsInstall(*settings.obs_dir) : FindInstalledObs();
-  // A picked folder OBS has gone from, say after OBS was reinstalled where
-  // its installer puts it: OBS is looked for there, as with no pick. If it
-  // isn't there either, the picked folder's error says more.
-  if (!install && settings.obs_dir) {
-    if (auto installed = FindInstalledObs()) install = std::move(installed);
-  }
   if (!install) {
     check.message = install.error();
     return check;
@@ -74,14 +70,9 @@ ObsCheck ObsBackend::CheckObs(const Settings& settings) {
 Result<import::ActiveObsConfig> ObsBackend::ReadObsConfig(const Settings& settings,
                                                           const runtime::ObsInstall& install) {
   if (!settings.obs_config) return ReadOwnObsConfig(install.root);
-  auto config = import::FindActiveObsConfig(import::ObsConfigRootAt(*settings.obs_config));
-  // A picked folder that can't be read, such as the wrong one: OBS's settings
-  // where OBS keeps them are read instead, so opening OBS to make them works.
-  // If those can't be read either, the picked folder's error says more.
-  if (!config) {
-    if (auto own = ReadOwnObsConfig(install.root)) config = std::move(own);
-  }
-  return config;
+  // As for the install: a picked folder that can't be read stays picked
+  // until the user picks another or goes back to OBS's own.
+  return import::FindActiveObsConfig(import::ObsConfigRootAt(*settings.obs_config));
 }
 
 Status ObsBackend::StartLibobs(const runtime::ObsInstall& install, const import::ProfileAudio& audio) {

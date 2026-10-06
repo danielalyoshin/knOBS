@@ -73,6 +73,8 @@ enum FirstRunId : int {
   kButtonShowSteps,      // To the second door.
   kButtonSkipFilters,    // Go on with a mic that has no filters.
   kButtonKeepDevice,     // Go on with a playback device that isn't a cable.
+  kButtonLookForObs,     // Drop the picked install folder and look for OBS.
+  kButtonOwnObsSettings,  // Drop the picked settings folder for OBS's own.
   kChoiceFirst = 200,
 };
 

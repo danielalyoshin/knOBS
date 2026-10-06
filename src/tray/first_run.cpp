@@ -289,12 +289,21 @@ PageView FindObs(const core::Snapshot& snapshot) {
   PageView view;
   view.icon = PageIcon::kWarning;
   view.instruction = "Can't find OBS Studio";
-  view.content = std::format("{}{}If OBS is installed somewhere else, such as by Steam or in a folder of its own, "
-                             "choose that folder. Otherwise, <a href=\"{}\">get OBS Studio</a>, install it, and "
-                             "try again.",
-                             snapshot.detail, snapshot.detail.empty() ? "" : "\n\n", kObsDownloadUrl);
-  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again"),
-                  Button(kButtonChooseObs, "Choose folder…")};
+  const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
+  view.buttons = {Button(kButtonBack, "Back"), Button(kButtonTryAgain, "Try again")};
+  if (snapshot.settings.obs_dir) {
+    // A folder picked before: it stays picked until the user says otherwise.
+    view.content = std::format("{}{}OBS isn't in the folder chosen for it. Choose the folder it's in now, or let {} "
+                               "look for it where OBS's installer puts it.",
+                               snapshot.detail, gap, kDisplayName);
+    view.buttons.push_back(Button(kButtonLookForObs, "Look for OBS"));
+  } else {
+    view.content = std::format("{}{}If OBS is installed somewhere else, such as by Steam or in a folder of its own, "
+                               "choose that folder. Otherwise, <a href=\"{}\">get OBS Studio</a>, install it, and "
+                               "try again.",
+                               snapshot.detail, gap, kObsDownloadUrl);
+  }
+  view.buttons.push_back(Button(kButtonChooseObs, "Choose folder…"));
   view.default_button = kButtonChooseObs;
   return view;
 }
@@ -316,13 +325,21 @@ PageView ObsSettings(const core::Snapshot& snapshot) {
   PageView view;
   view.icon = PageIcon::kWarning;
   view.instruction = "Can't read OBS's settings";
-  view.content = std::format("{}{}If your OBS keeps its settings in a folder of its own, as a portable OBS does, "
-                             "choose that folder: the one that holds obs-studio.",
-                             snapshot.detail, snapshot.detail.empty() ? "" : "\n\n");
+  const std::string_view gap = snapshot.detail.empty() ? "" : "\n\n";
+  // A folder picked before stays picked until the user says otherwise.
+  const bool picked = snapshot.settings.obs_config.has_value();
+  view.content = picked ? std::format("{}{}OBS's settings aren't in the folder chosen for them. Choose the folder "
+                                      "that holds obs-studio now, or use the one OBS keeps them in.",
+                                      snapshot.detail, gap)
+                        : std::format("{}{}If your OBS keeps its settings in a folder of its own, as a portable OBS "
+                                      "does, choose that folder: the one that holds obs-studio.",
+                                      snapshot.detail, gap);
   view.footer = ObsOpenLine(snapshot);
   view.buttons = {Button(kButtonBack, "Back"), Button(kButtonChooseObsSettings, "Choose folder…")};
+  if (picked) view.buttons.push_back(Button(kButtonOwnObsSettings, "Use OBS's own folder"));
   if (ObsInstalled(snapshot)) view.buttons.push_back(Button(kButtonOpenObs, "Open OBS", !snapshot.obs_running));
-  view.default_button = ObsInstalled(snapshot) && !snapshot.obs_running ? kButtonOpenObs : kButtonChooseObsSettings;
+  view.default_button =
+      ObsInstalled(snapshot) && !snapshot.obs_running && !picked ? kButtonOpenObs : kButtonChooseObsSettings;
   return view;
 }
 
@@ -643,6 +660,12 @@ FirstRunAction FirstRun::Click(int button, int choice, bool checked, const core:
       return {.kind = FirstRunAction::Kind::kChooseObs};
     case kButtonChooseObsSettings:
       return {.kind = FirstRunAction::Kind::kChooseObsSettings};
+    case kButtonLookForObs:
+      settings.obs_dir.reset();
+      return apply();
+    case kButtonOwnObsSettings:
+      settings.obs_config.reset();
+      return apply();
     case kButtonTryAgain:
       return {.kind = FirstRunAction::Kind::kReimport};
     case kButtonRestart:

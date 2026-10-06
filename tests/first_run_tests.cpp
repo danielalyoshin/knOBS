@@ -451,6 +451,42 @@ TEST(ProblemsWithObsComeFirst) {
   CHECK(FirstRun({.door = Door::kObsUser, .reached = Page::kDone}, Page::kCable).Page(snapshot) == Page::kProblem);
 }
 
+TEST(APickedFolderThatStoppedWorkingIsTheUsersToChange) {
+  // OBS gone from the folder picked for it: pick another, or look for OBS
+  // as with no pick. Nothing is dropped until the user says.
+  core::Snapshot snapshot;
+  snapshot.state = State::kObsMissing;
+  snapshot.detail = "D:\\OBS isn't a complete OBS Studio install: bin\\64bit\\obs.dll is missing.";
+  snapshot.settings.obs_dir = "D:\\OBS";
+  FirstRun first_run = ObsUser(snapshot);
+  PageView view = first_run.View(snapshot);
+  CHECK(view.page == Page::kFindObs && Contains(view.content, "OBS isn't in the folder chosen for it."));
+  CHECK(Texts(view.buttons) == (std::vector<std::string>{"Back", "Try again", "Look for OBS", "Choose folder…"}));
+  CHECK(view.default_button == kButtonChooseObs);
+  FirstRunAction action = first_run.Click(kButtonLookForObs, 0, false, snapshot);
+  CHECK(action.kind == Kind::kApply && !action.settings.obs_dir);
+  snapshot.settings.obs_dir.reset();
+  view = ObsUser(snapshot).View(snapshot);
+  CHECK(!FindButton(view, kButtonLookForObs));
+
+  // The same for OBS's settings: pick another folder, or use OBS's own.
+  snapshot.state = State::kNeedsSetup;
+  snapshot.setup = SetupNeed::kObsSettings;
+  snapshot.obs = {"C:\\Program Files\\obs-studio", {32, 2, 2}};
+  snapshot.settings.obs_config = "E:\\Portable\\config";
+  first_run = ObsUser(snapshot);
+  view = first_run.View(snapshot);
+  CHECK(view.page == Page::kObsSettings && Contains(view.content, "aren't in the folder chosen for them."));
+  CHECK(Texts(view.buttons) ==
+        (std::vector<std::string>{"Back", "Choose folder…", "Use OBS's own folder", "Open OBS"}));
+  CHECK(view.default_button == kButtonChooseObsSettings);
+  action = first_run.Click(kButtonOwnObsSettings, 0, false, snapshot);
+  CHECK(action.kind == Kind::kApply && !action.settings.obs_config);
+  snapshot.settings.obs_config.reset();
+  view = ObsUser(snapshot).View(snapshot);
+  CHECK(!FindButton(view, kButtonOwnObsSettings));
+}
+
 // --- The second door ----------------------------------------------------------------
 
 TEST(SecondDoorListsTheStepsInOBSWords) {

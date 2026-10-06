@@ -571,6 +571,12 @@ void TrayApp::ToggleStartWithWindows() {
 }
 
 void TrayApp::FindObs() {
+  // OBS has gone from a folder picked before: the first run's page offers
+  // another folder or looking for OBS as with no pick, for the user to say.
+  if (settings_.obs_dir) {
+    ShowFirstRun(false, FirstRunPage::kFindObs);
+    return;
+  }
   const auto folder = runtime::PickObsInstallFolder(nullptr);
   if (!folder) return;
   core::Settings settings = settings_;
