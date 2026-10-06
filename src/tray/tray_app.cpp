@@ -14,7 +14,6 @@
 #include <vector>
 
 #include "app_info.h"
-#include "runtime/obs_install.h"
 #include "tray/message_dialog.h"
 #include "tray/open_obs.h"
 #include "tray/settings_file.h"
@@ -571,17 +570,9 @@ void TrayApp::ToggleStartWithWindows() {
 }
 
 void TrayApp::FindObs() {
-  // OBS has gone from a folder picked before: the first run's page offers
-  // another folder or looking for OBS as with no pick, for the user to say.
-  if (settings_.obs_dir) {
-    ShowFirstRun(false, FirstRunPage::kFindObs);
-    return;
-  }
-  const auto folder = runtime::PickObsInstallFolder(nullptr);
-  if (!folder) return;
-  core::Settings settings = settings_;
-  settings.obs_dir = *folder;
-  ApplySettings(settings);
+  // The first run's page, not a bare folder picker: it says how to get OBS,
+  // offers Choose folder…, and Look for OBS when a folder was picked before.
+  ShowFirstRun(false, FirstRunPage::kFindObs);
 }
 
 void TrayApp::OpenLogFolder() {
@@ -597,7 +588,7 @@ bool TrayApp::Restart() {
   restart_tried_ = true;
   if (!options_.restart) return false;
   if (const Status started = options_.restart(snapshot_.restart); !started) {
-    ShowError(started.error());
+    ShowError(std::format("{}\n\nQuit {}, then start it again.", started.error(), kDisplayName));
     return false;
   }
   Quit();
