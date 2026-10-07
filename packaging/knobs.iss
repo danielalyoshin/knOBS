@@ -1,7 +1,8 @@
 ; SPDX-License-Identifier: GPL-2.0-or-later
 ;
 ; The installer, built with Inno Setup 6 by packaging\package.ps1, which
-; passes the defines below. It installs for the current user only, with no
+; passes the defines below (and Sign, with a signtool command, to sign the
+; uninstaller and the installer). It installs for the current user only, with no
 ; admin rights, into %LocalAppData%\Programs\knobs: knobs's Run entry and its
 ; data are per user too. Uninstalling closes knobs, removes its Run entry
 ; and %LocalAppData%\knobs (the copy of OBS's files and the logs), and asks
@@ -40,6 +41,11 @@ Compression=lzma2/max
 SolidCompression=yes
 ; Setup closes a running knobs itself (PrepareToInstall).
 CloseApplications=no
+#ifdef Sign
+; package.ps1 -Sign defines the signtool command.
+SignTool=signtool
+SignedUninstaller=yes
+#endif
 
 [Files]
 Source: "{#StageDir}\{#AppName}.exe"; DestDir: "{app}"; Flags: ignoreversion

@@ -5,13 +5,24 @@ Packages a Release build of knobs as an installer and a portable zip.
 
 .DESCRIPTION
 Takes knobs.exe from build\x64\Release (build it first: cmake --build --preset
-release), and writes to build\package:
+release), or the exe given, and writes to build\package:
   <name>-<version>-setup.exe      the installer, built with Inno Setup 6
   <name>-<version>-portable.zip   the portable copy: a folder with knobs.exe and
                                   portable_mode.txt, which keeps its data beside it
   SHA256SUMS.txt                  the checksums of both
 The name comes from src\app_info.h and the version from CMakeLists.txt. The
 exe's own version has to match.
+
+.PARAMETER Exe
+The knobs.exe to package. By default, build\x64\Release's.
+
+.PARAMETER Sign
+Signs knobs.exe before it's packaged, and the installer and its uninstaller,
+with SignScript.
+
+.PARAMETER SignScript
+What signs: a script that takes -Description, -Url and the files to sign. By
+default, sign.ps1, which uses Azure Artifact Signing and says what it needs.
 
 .PARAMETER Iscc
 Inno Setup's compiler. By default, ISCC.exe on PATH or in Inno Setup 6's usual
@@ -21,6 +32,9 @@ folders.
 Writes only the portable zip.
 #>
 param(
+  [string]$Exe,
+  [switch]$Sign,
+  [string]$SignScript = "$PSScriptRoot\sign.ps1",
   [string]$Iscc,
   [switch]$NoInstaller
 )
@@ -32,10 +46,12 @@ $name = [regex]::Match((Get-Content -Raw "$root\src\app_info.h"), '#define KNOBS
 $version = [regex]::Match((Get-Content -Raw "$root\CMakeLists.txt"), 'project\(\w+ VERSION (\d+\.\d+\.\d+)').Groups[1].Value
 if (-not $name -or -not $version) { throw "Couldn't read the name from src\app_info.h or the version from CMakeLists.txt." }
 
-$exe = "$root\build\x64\Release\$name.exe"
-if (-not (Test-Path $exe)) { throw "$exe doesn't exist. Build it first: cmake --build --preset release" }
-$exeVersion = (Get-Item $exe).VersionInfo.ProductVersion
-if ($exeVersion -ne $version) { throw "$exe is version $exeVersion, but CMakeLists.txt says $version. Build again." }
+$url = 'https://github.com/danielalyoshin/knobs'
+if (-not $Exe) { $Exe = "$root\build\x64\Release\$name.exe" }
+if (-not (Test-Path $Exe)) { throw "$Exe doesn't exist. Build it first: cmake --build --preset release" }
+$exeVersion = (Get-Item $Exe).VersionInfo.ProductVersion
+if ($exeVersion -ne $version) { throw "$Exe is version $exeVersion, but CMakeLists.txt says $version. Build again." }
+if ($Sign -and -not (Test-Path $SignScript)) { throw "$SignScript doesn't exist." }
 
 $out = "$root\build\package"
 $stage = "$out\stage\$name"
@@ -47,7 +63,9 @@ function Write-Text([string]$from, [string]$to) {
   $text = (Get-Content -Raw $from) -replace '@NAME@', $name -replace '@VERSION@', $version
   [IO.File]::WriteAllText($to, ($text -replace "`r?`n", "`r`n"), [Text.UTF8Encoding]::new($false))
 }
-Copy-Item $exe $stage
+Copy-Item $Exe "$stage\$name.exe"
+# Signed before it's packaged, so the zip and the installer carry the signed exe.
+if ($Sign) { & $SignScript -Description $name -Url $url "$stage\$name.exe" }
 Write-Text "$root\LICENSE" "$stage\LICENSE.txt"
 Write-Text "$PSScriptRoot\NOTICE.txt" "$stage\NOTICE.txt"
 
@@ -81,7 +99,14 @@ if (-not $NoInstaller) {
     }
   }
   if (-not $Iscc -or -not (Test-Path $Iscc)) { throw "Couldn't find Inno Setup 6's ISCC.exe. Install it, or pass -Iscc." }
-  & $Iscc /Q "/DAppName=$name" "/DAppVersion=$version" "/DStageDir=$stage" "/DOutputDir=$out" "$PSScriptRoot\knobs.iss"
+  $defines = @("/DAppName=$name", "/DAppVersion=$version", "/DStageDir=$stage", "/DOutputDir=$out")
+  if ($Sign) {
+    # Inno Setup signs the uninstaller and the installer with this command:
+    # $q is a quote and $f the quoted file.
+    $defines += '/DSign', ('/Ssigntool=powershell.exe -NoProfile -ExecutionPolicy Bypass -File $q' + $SignScript +
+      '$q -Description ' + $name + ' -Url ' + $url + ' $f')
+  }
+  & $Iscc /Q @defines "$PSScriptRoot\knobs.iss"
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed (exit code $LASTEXITCODE)." }
   $artifacts += "$out\$name-$version-setup.exe"
 }

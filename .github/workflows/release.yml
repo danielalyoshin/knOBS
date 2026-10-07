@@ -1,8 +1,14 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 #
-# A tag like v0.1.0 builds, tests and packages that version, then makes a
-# draft release with the installer, the portable zip and their checksums.
-# Publish the draft on GitHub once its notes read right.
+# A tag like v0.1.0 builds and tests that version, signs and packages it, then
+# makes a draft release with the installer, the portable zip and their
+# checksums. Publish the draft on GitHub once its notes read right.
+#
+# Signing uses Azure Artifact Signing (plan.md, Code signing). It's set up in
+# the release environment: the variables ARTIFACT_SIGNING_ENDPOINT,
+# ARTIFACT_SIGNING_ACCOUNT and ARTIFACT_SIGNING_PROFILE, and the secrets
+# AZURE_TENANT_ID and AZURE_CLIENT_ID. Without them, the release is unsigned,
+# with a warning; with them, a failure to sign fails the release.
 name: Release
 
 on:
@@ -30,9 +36,81 @@ jobs:
     needs: check
     uses: ./.github/workflows/build.yml
 
+  package:
+    name: Sign and package
+    needs: build
+    runs-on: windows-2025
+    environment: release
+    permissions:
+      contents: read
+      id-token: write
+    outputs:
+      signed: ${{ steps.signing.outputs.signed }}
+    env:
+      INNO_SETUP_VERSION: 6.7.1
+      ARTIFACT_SIGNING_CLIENT_VERSION: 1.0.128
+      ARTIFACT_SIGNING_CLIENT_SHA256: 74bd7d27e6ce1051409c38d9b46bc8df0400ecd643d51ffbf2ac00869061e40b
+      ARTIFACT_SIGNING_ENDPOINT: ${{ vars.ARTIFACT_SIGNING_ENDPOINT }}
+      ARTIFACT_SIGNING_ACCOUNT: ${{ vars.ARTIFACT_SIGNING_ACCOUNT }}
+      ARTIFACT_SIGNING_PROFILE: ${{ vars.ARTIFACT_SIGNING_PROFILE }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: exe
+          path: exe
+
+      - name: Check that signing is set up
+        id: signing
+        run: |
+          if ($env:ARTIFACT_SIGNING_ENDPOINT) {
+            "signed=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "signed=false" >> $env:GITHUB_OUTPUT
+            "::warning::Signing isn't set up in the release environment, so this release is unsigned. plan.md, Code signing, has the steps."
+          }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --version $env:INNO_SETUP_VERSION --yes --no-progress
+
+      - name: Install the Artifact Signing plugin
+        if: steps.signing.outputs.signed == 'true'
+        run: |
+          $package = "$env:RUNNER_TEMP\artifact-signing-client.zip"
+          $url = "https://api.nuget.org/v3-flatcontainer/microsoft.artifactsigning.client/$env:ARTIFACT_SIGNING_CLIENT_VERSION/microsoft.artifactsigning.client.$env:ARTIFACT_SIGNING_CLIENT_VERSION.nupkg"
+          Invoke-WebRequest $url -OutFile $package
+          $hash = (Get-FileHash -Algorithm SHA256 $package).Hash.ToLower()
+          if ($hash -ne $env:ARTIFACT_SIGNING_CLIENT_SHA256) { throw "The Artifact Signing plugin has an unexpected checksum: $hash" }
+          Expand-Archive $package "$env:RUNNER_TEMP\artifact-signing-client"
+          "ARTIFACT_SIGNING_DLIB=$env:RUNNER_TEMP\artifact-signing-client\bin\x64\Azure.CodeSigning.Dlib.dll" >> $env:GITHUB_ENV
+
+      - name: Sign in to Azure
+        if: steps.signing.outputs.signed == 'true'
+        uses: azure/login@v3
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          allow-no-subscriptions: true
+
+      - name: Package
+        run: |
+          $exe = (Get-ChildItem exe -Filter *.exe | Select-Object -First 1).FullName
+          if ('${{ steps.signing.outputs.signed }}' -eq 'true') {
+            ./packaging/package.ps1 -Exe $exe -Sign
+          } else {
+            ./packaging/package.ps1 -Exe $exe
+          }
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-packages
+          path: build/package/
+          if-no-files-found: error
+
   release:
     name: Draft the release
-    needs: build
+    needs: package
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -41,15 +119,21 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: packages
+          name: release-packages
           path: packages
 
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}
+          SIGNED: ${{ needs.package.outputs.signed }}
         run: |
           name=$(grep -oP '#define KNOBS_DISPLAY_NAME "\K[^"]+' src/app_info.h)
           version=${GITHUB_REF_NAME#v}
-          sed -e "s/@NAME@/$name/g" -e "s/@VERSION@/$version/g" .github/release-notes.md > notes.md
+          if [ "$SIGNED" = "true" ]; then
+            signing="$name is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows SmartScreen may still warn about a new release until enough people have run it. Choose **More info**, then **Run anyway**."
+          else
+            signing="$name isn't code-signed yet, so Windows SmartScreen may warn the first time you run it. Choose **More info**, then **Run anyway**."
+          fi
+          sed -e "s|@NAME@|$name|g" -e "s|@VERSION@|$version|g" -e "s|@SIGNING@|$signing|" .github/release-notes.md > notes.md
           { echo; echo '```'; cat packages/SHA256SUMS.txt; echo '```'; } >> notes.md
           gh release create "$GITHUB_REF_NAME" packages/* --draft --verify-tag --title "$name $version" --notes-file notes.md

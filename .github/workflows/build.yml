@@ -59,3 +59,17 @@ jobs:
           name: packages
           path: build/package/
           if-no-files-found: error
+
+      - name: Find the tray app
+        id: app
+        run: |
+          $name = [regex]::Match((Get-Content -Raw src/app_info.h), '#define KNOBS_DISPLAY_NAME "([^"]+)"').Groups[1].Value
+          "exe=build/x64/Release/$name.exe" >> $env:GITHUB_OUTPUT
+
+      # The tested exe, for Release to sign and package.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: exe
+          path: ${{ steps.app.outputs.exe }}
+          retention-days: 7
+          if-no-files-found: error

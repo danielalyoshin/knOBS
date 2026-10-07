@@ -7,7 +7,7 @@
 
 You need 64-bit Windows, OBS Studio 32.2.x with your mic set up in it, and a virtual cable such as [VB-Cable](https://vb-audio.com/Cable/). The [setup guide](https://github.com/danielalyoshin/knobs#setup) has the steps.
 
-@NAME@ isn't code-signed yet, so Windows SmartScreen may warn the first time you run it. Choose **More info**, then **Run anyway**.
+@SIGNING@
 
 @NAME@ is an independent project. It isn't affiliated with or endorsed by the OBS Project.
 
