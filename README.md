@@ -12,12 +12,13 @@
 A Windows tray app that runs the mic filter chain you tuned in OBS Studio and sends it to a virtual audio cable.<br>
 Discord, Zoom and games get the same processed mic while OBS stays closed.
 
-[![Status: pre-release](https://img.shields.io/badge/status-pre--release-5c5f66?labelColor=33353a)](#roadmap)
+[![Release](https://img.shields.io/github/v/release/danielalyoshin/knobs?include_prereleases&sort=semver&label=release&color=5c5f66&labelColor=33353a)](https://github.com/danielalyoshin/knobs/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/danielalyoshin/knobs/ci.yml?branch=main&label=CI&labelColor=33353a)](https://github.com/danielalyoshin/knobs/actions/workflows/ci.yml)
 [![Windows x64](https://img.shields.io/badge/Windows-x64-5c5f66?labelColor=33353a)](#requirements)
 [![OBS Studio 32.2](https://img.shields.io/badge/OBS%20Studio-32.2-5c5f66?labelColor=33353a)](#requirements)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-5c5f66?labelColor=33353a)](LICENSE)
 
-[Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design plan](plan.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
+[Download](https://github.com/danielalyoshin/knobs/releases/latest) · [Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design plan](plan.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
 
 <sub>An independent project. Not affiliated with or endorsed by the OBS Project.</sub>
 
@@ -26,7 +27,7 @@ Discord, Zoom and games get the same processed mic while OBS stays closed.
 <br>
 
 > [!NOTE]
-> **No release yet.** knobs works end to end and has been tested on real hardware with OBS 32.2.2, an Audient iD4, VB-Cable and Discord. An installer or a portable zip comes next. Until then, [build it from source](#building).
+> **knobs is new.** It works end to end and has been tested on real hardware with OBS 32.2.2, an Audient iD4, VB-Cable and Discord, but few people have run it yet. If something doesn't work, [open an issue](https://github.com/danielalyoshin/knobs/issues).
 
 ## Why knobs
 
@@ -112,9 +113,16 @@ OBS's [Filters Guide](https://obsproject.com/kb/filters-guide) has more on each.
 
 </details>
 
-### 3. Start knobs
+### 3. Install and start knobs
 
-Until there's a release, [build knobs](#building) and run `build\x64\Release\knobs.exe`. Its first run checks what it found in OBS and asks only what it needs to:
+Download knobs from the [latest release](https://github.com/danielalyoshin/knobs/releases/latest). There are two ways to run it:
+
+- **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end.
+- **The portable zip**, `knobs-<version>-portable.zip`. Unzip it anywhere and run `knobs.exe`. It keeps its settings and its data in a `data` folder beside the exe, and nothing in your user folders.
+
+knobs isn't code-signed yet, so Windows SmartScreen may warn the first time you run it. Choose **More info**, then **Run anyway**.
+
+The first run checks what it found in OBS and asks only what it needs to:
 
 - **Which mic**, if OBS has several.
 - **Which cable**, if OBS doesn't monitor the mic to one. With no cable installed, it links to VB-Cable and waits for one.
@@ -151,12 +159,14 @@ In Discord, Zoom, your games and your browser, choose the cable's recording side
 
 **Notifications** say when the mic or the cable has been missing for 5 seconds, when your chain changed in OBS, when a filter can't run, and when OBS was updated. A click on one opens the fix. When OBS updates to a version knobs supports, knobs restarts by itself to use it. With Do Not Disturb on, the icon still shows the state: a pause badge while paused, and a **!** badge while the cable isn't getting your mic.
 
-**knobs keeps its files** in two folders, and never writes to OBS's settings or its install:
+**knobs keeps its files** in two folders, and never writes to OBS's settings or its install. A portable copy keeps both in the `data` folder beside its `knobs.exe` instead.
 
 | Folder | Holds |
 |:---|:---|
 | `%AppData%\knobs` | `settings.ini`: your choices in the menu and the first run |
 | `%LocalAppData%\knobs` | The private copy of OBS's files (about 54 MB for 32.2.2) and the logs |
+
+**To uninstall,** use **Settings › Apps › Installed apps** in Windows. Uninstalling quits knobs, turns off Start with Windows, and removes the copy of OBS's files and the logs. It then asks whether to delete your settings too. For a portable copy, turn off **Start with Windows** in its menu, quit it, and delete its folder.
 
 ## Known limits
 
@@ -174,7 +184,7 @@ In Discord, Zoom, your games and your browser, choose the cable's recording side
 - [x] Run OBS's own filters, with output bit-identical to OBS's
 - [x] Import the mic and its chain from OBS's settings
 - [x] Tray app, first run and notifications
-- [ ] Installer or portable zip
+- [x] Installer and portable zip
 - [ ] OBS 33.0, after its release
 
 Ideas for later, not promised: VST filters, NVIDIA noise removal, push-to-talk, and switching between chains. [plan.md](plan.md#8-future-ideas-v2) has the list.
@@ -194,6 +204,12 @@ ctest --preset release           # tests that need OBS skip if it isn't installe
 ```
 
 The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\`). No test opens an audio device.
+
+### Packaging
+
+`packaging\package.ps1` packages the Release build as the installer and the portable zip, with their checksums, in `build\package\`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php).
+
+[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)).
 
 ### Dev tools
 
@@ -221,6 +237,7 @@ Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic
 | `src/core` | The always-on core: following OBS and the devices, and rebuilding the chain |
 | `src/tray` | The tray app: menu, first run, notifications and settings |
 | `tools/` | The dev tools |
+| `packaging/` | The installer's script, the files that ship in each package, and the script that builds both |
 | `tests/` | Unit tests, and the import and core tests on made-up OBS settings |
 
 [plan.md](plan.md) has the design, what was measured and why, and the milestones.

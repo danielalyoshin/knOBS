@@ -44,6 +44,7 @@ Don't open the mic without the user's go-ahead.
 - `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/compare/`, `tools/live/`, `tools/core/`, `tools/tray/`: the dev tools above. `tools/tray/` also has the fake backend and the screenshots. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`, and `tools/render-icon.ps1` renders `assets/knobs.ico`.
 - `tests/`: unit tests, which don't need OBS (`core_tests.cpp` runs the core on a fake backend, `tray_tests.cpp` checks the menu, the settings file, the Run entry on a scratch key, the lock, and starting OBS with a stand-in, `first_run_tests.cpp` the first run's pages and moves, and `notices_tests.cpp` the notifications and badges on knobs-tray's fake core), and the import and core tests, which run `knobs-import` and `knobs-core` on the made-up OBS settings in `tests/fixtures/obs-config`.
 - `packaging/`: the installer's Inno Setup script, the text files that ship in each package, and `package.ps1`, which builds both packages.
+- `.github/workflows/`: CI (`ci.yml`, which calls `build.yml`: build, every test against an installed OBS, packages) and `release.yml`, which drafts a release from a `v<version>` tag.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
 - `assets/`: the logo. The SVGs are the masters, and `knobs.ico` is the app icon, built into `knobs.exe`: the knob alone, with no tile. `assets/README.md` has the colors and usage rules.
 - `PRODUCT.md`: who knobs is for, its voice and brand commitments. Read it before UI or copy work.
