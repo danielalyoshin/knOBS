@@ -389,6 +389,13 @@ Checked against libobs's monitor (`audio-monitoring/win32/wasapi-output.c`), `ob
 
 **What's left is optional.** Hours of the mic into the cable beside OBS would confirm on real hardware what the code and these measurements say: no creep on this PC, a dropout every 5 min or so in both, and restarts only in silence. It isn't needed to ship.
 
+### Packaging (M4)
+
+Built on 2026-10-07 in `packaging/`. `packaging/package.ps1` takes the Release `knobs.exe` and writes both packages to `build\package`, with a `SHA256SUMS.txt`. The name comes from `src/app_info.h` and the version from `CMakeLists.txt`, and the exe's own version has to match. Each package has `knobs.exe`, `LICENSE.txt` (the GPL) and `NOTICE.txt` (copyright, where this version's source is, the trademarks and the logo's carve-out, and that knobs isn't affiliated with the OBS Project). No libobs and no OBS files.
+- **The installer** (`knobs-<version>-setup.exe`, Inno Setup 6, `packaging/knobs.iss`) installs for the current user only, with no admin rights, in `%LocalAppData%\Programs\knobs`, as knobs's Run entry and data are per user. It adds a Start menu shortcut and offers to start knobs at the end. A running knobs is asked to quit first (`WM_CLOSE` to its `knobs.tray` window), on install and on uninstall. Uninstalling removes knobs's Run entry if it starts this install's exe, not a portable copy's, and `%LocalAppData%\knobs` (the copy of OBS's files and the logs), then asks whether to delete `%AppData%\knobs` too: the settings (decided 2026-10-07). A silent uninstall keeps them. Tested with a copy named `knobs-test`, so as not to touch this PC's knobs folders.
+- **The portable zip** (`knobs-<version>-portable.zip`) unzips to a `knobs` folder with the same files and `portable_mode.txt`. Beside the exe, that file keeps all of knobs's state in a `data` folder there and nothing in `%AppData%` or `%LocalAppData%` (`AppDirsFor`, decided 2026-10-07). OBS's settings are still read from `%AppData%\obs-studio`. Start with Windows still writes the Run entry, pointing at that folder. The zip's entries are named by hand, since Windows PowerShell's zip writers use backslashes.
+- **Unsigned for now.** Windows SmartScreen warns on the first run of an unsigned download until it has a reputation.
+
 ## 5. Milestones
 
 **M0 — Runtime bootstrap** (done 2026-09-30 against OBS 32.2.2; see M0 findings in §4)
@@ -429,7 +436,7 @@ Checked against libobs's monitor (`audio-monitoring/win32/wasapi-output.c`), `ob
 - [ ] *(Optional)* Long-run latency on real hardware: the mic into the cable for hours, beside OBS, to confirm what the code and the measurements predict (no creep on this PC, a dropout every 5 min or so in both, restarts only in silence).
 
 **M4 — Ship**
-- [ ] Packaging: small exe (no bundled libobs); simple installer or portable zip
+- [x] Packaging: small exe (no bundled libobs); simple installer or portable zip. Both, built 2026-10-07 (Packaging in §4).
 - [ ] README with the pitch ("close OBS, keep your mic"), setup guide, VB-Cable pointer, "requires OBS Studio installed" + supported version range. The first run links to the setup guide as the README's `#setup` anchor (`kSetupGuideUrl`). Written 2026-10-06, apart from the download: until packaging lands, Setup builds knobs from source.
 - [ ] GPL-2.0-or-later compliance (links libobs): publish source, include license texts
 - [ ] AI-use disclaimer in the forum post (required by the OBS Forum Resource and IP Policy)

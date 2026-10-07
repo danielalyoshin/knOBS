@@ -1,0 +1,24 @@
+@NAME@ @VERSION@
+https://github.com/danielalyoshin/knobs
+
+Copyright (C) 2026 Daniel Alyoshin
+
+@NAME@ is free software: you can redistribute it and/or modify it under the
+terms of the GNU General Public License as published by the Free Software
+Foundation, either version 2 of the License, or (at your option) any later
+version. It comes with no warranty. LICENSE.txt has the license.
+
+The source code of this version is at
+https://github.com/danielalyoshin/knobs/tree/v@VERSION@
+
+@NAME@ runs the filters of the OBS Studio you installed. It ships no OBS code:
+when it runs, it loads OBS's libobs from a private copy of your install. Its
+source includes declarations from OBS Studio's libobs headers, under the GNU
+General Public License, version 2 or later.
+
+The @NAME@ name and logo are trademarks of Daniel Alyoshin. The logo, which is
+also the app's icon, isn't covered by the GPL: TRADEMARKS.md in the source
+says how you can use the name and the logo.
+
+@NAME@ is an independent project. It isn't affiliated with or endorsed by the
+OBS Project.

@@ -20,6 +20,8 @@ ctest --preset debug          # unit tests, then smoke, harness, import and core
 
 The build puts the tray app, `knobs.exe`, in `build\x64\<config>\`. It runs the real core: unless OBS is open or something needs setting up, it opens the mic. Use `knobs-tray` to look at the tray and the first run instead.
 
+`packaging\package.ps1` packages the Release build as an installer (Inno Setup 6) and a portable zip in `build\package`. Don't test an uninstall of the real installer on this PC: it deletes `%LocalAppData%\knobs`. Build one with another `AppName` instead (plan.md, Packaging).
+
 The dev tools in `build\x64\<config>\` each take `--help`:
 - `knobs-smoke`: the M0 bootstrap check. Options include `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`).
 - `knobs-import`: imports the mic from OBS's active profile and scene collection and reports each step: settings found, mics, pre-flight warnings, the chain libobs loads. `--obs-config` points it at another OBS settings folder, `--pick` chooses among several mics, `--save` writes the source object. It opens no audio devices.
@@ -41,6 +43,7 @@ Don't open the mic without the user's go-ahead.
 - `tools/common/`: code shared by the dev tools (console output, WAV files, the push source and offline runs, the test signal, the tools' start-up and import steps, aligning and diffing audio, energy envelopes and peaks, a seeded RNG). It isn't part of the app.
 - `tools/smoke/`, `tools/import/`, `tools/harness/`, `tools/compare/`, `tools/live/`, `tools/core/`, `tools/tray/`: the dev tools above. `tools/tray/` also has the fake backend and the screenshots. `tools/vendor-libobs-headers.ps1` refreshes `third_party/libobs`, and `tools/render-icon.ps1` renders `assets/knobs.ico`.
 - `tests/`: unit tests, which don't need OBS (`core_tests.cpp` runs the core on a fake backend, `tray_tests.cpp` checks the menu, the settings file, the Run entry on a scratch key, the lock, and starting OBS with a stand-in, `first_run_tests.cpp` the first run's pages and moves, and `notices_tests.cpp` the notifications and badges on knobs-tray's fake core), and the import and core tests, which run `knobs-import` and `knobs-core` on the made-up OBS settings in `tests/fixtures/obs-config`.
+- `packaging/`: the installer's Inno Setup script, the text files that ship in each package, and `package.ps1`, which builds both packages.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
 - `assets/`: the logo. The SVGs are the masters, and `knobs.ico` is the app icon, built into `knobs.exe`: the knob alone, with no tile. `assets/README.md` has the colors and usage rules.
 - `PRODUCT.md`: who knobs is for, its voice and brand commitments. Read it before UI or copy work.

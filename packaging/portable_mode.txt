@@ -1,0 +1,9 @@
+This file makes @NAME@ portable. While it's here, @NAME@ keeps its settings,
+its logs and its copy of OBS's files in the data folder beside @NAME@.exe,
+and writes nothing to %AppData% or %LocalAppData%.
+
+Start with Windows still adds an entry to your Windows sign-in, pointing at
+this folder. Turn it off before you move or delete the folder.
+
+Delete this file to use %AppData% and %LocalAppData% instead, as the
+installed @NAME@ does.
