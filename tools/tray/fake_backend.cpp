@@ -184,6 +184,11 @@ const std::vector<FakeScenario>& FakeScenarios() {
          world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {33, 0, 0}},
                       runtime::UnsupportedObsMessage("33.0.0")};
        }},
+      {"obs-too-old", "OBS 31.1.4 is installed, which is too old",
+       [](FakeWorld& world, FakeScript&) {
+         world.obs = {core::ObsFound::kUnsupported, {"C:\\Program Files\\obs-studio", {31, 1, 4}},
+                      runtime::UnsupportedObsMessage("31.1.4")};
+       }},
       {"restart", std::format("OBS was updated to 32.2.3 while {} ran, so it restarts", kDisplayName),
        [](FakeWorld& world, FakeScript& script) {
          world.obs_later = world.obs;
