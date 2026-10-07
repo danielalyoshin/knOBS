@@ -10,7 +10,7 @@ knobs, all lowercase, as in the audio kind. It was styled knOBS until 2026-10-05
 
 ## Problem
 
-XLR mic users who tuned a filter chain in OBS (noise suppression → gate → expander → compressor → limiter) and route it through a virtual cable get consistent, processed audio in every app — Discord, Zoom, games, browser. The cost: OBS must stay open forever, even when not recording or streaming.
+XLR mic users who tuned a filter chain in OBS (noise suppression → gate → expander → compressor → limiter) and route it through a virtual cable get consistent, processed audio in every app. The cost: OBS must stay open forever, even when not recording or streaming.
 
 This got worse in OBS 32.0: the `--disable-shutdown-check` flag is ignored, so the Safe Mode popup appears on every boot and blocks unattended background use ([obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650)). The reporter's use case is exactly this one — OBS as a background mic processor feeding VB-Cable.
 
@@ -57,7 +57,7 @@ flowchart TB
   importer -- "obs_load_private_source" --> source
   mic(["Mic"]) --> source
   monitor --> cable(["Virtual cable<br>such as CABLE In 16ch"])
-  cable --> apps(["Discord, Zoom, games<br>record from CABLE Output"])
+  cable --> apps(["Other apps<br>record from CABLE Output"])
   tray -. "pause, resume, re-import" .-> importer
 ```
 
@@ -394,7 +394,7 @@ Checked against libobs's monitor (`audio-monitoring/win32/wasapi-output.c`), `ob
 ## Success criteria
 
 1. Harness output is bit-identical run-to-run, and the comparison against OBS is below threshold on test signals and real voice. Met in M2: the outputs are bit-identical.
-2. OBS closed, knobs in tray: mic sounds identical in Discord/Zoom/games. Met on 2026-10-06 in Discord: knobs and OBS sounded the same by ear (M3 test on real hardware). Zoom and games weren't tried.
+2. OBS closed, knobs in tray: mic sounds identical in other apps. Met on 2026-10-06 in Discord: knobs and OBS sounded the same by ear (M3 test on real hardware). No other app was tried.
 3. Cold boot → working filtered mic with zero clicks. Met on 2026-10-06: knobs was running 9.5 s after logon, with nothing clicked.
 4. Opening OBS while knobs runs never produces doubled audio. Met on 2026-10-06 over six opens and closes: knobs and OBS were never active on the cable at once, and no echo was heard. The worst case leaves about 0.4 s on that PC.
 5. Idle resource usage meaningfully below OBS-minimized. Met on 2026-10-06: running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB.

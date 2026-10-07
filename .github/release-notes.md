@@ -1,4 +1,4 @@
-@NAME@ runs the mic filter chain you tuned in OBS Studio and sends it to a virtual audio cable, so Discord, Zoom and games get the same processed mic while OBS stays closed.
+@NAME@ runs the mic filter chain you tuned in OBS Studio and sends it to a virtual audio cable, so your other apps get the same processed mic while OBS stays closed.
 
 ## Download
 

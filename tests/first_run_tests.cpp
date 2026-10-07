@@ -154,7 +154,7 @@ TEST(FirstDoorShowsOnlyWhatsNeeded) {
   CHECK(done.instruction == "Your mic is set up");
   CHECK(done.content.starts_with(
       "Mic/Aux › Noise Suppression › Noise Gate › Compressor › Limiter › CABLE In 16ch\n\n"
-      "In Discord, Zoom and other apps, choose CABLE Output as your mic."));
+      "In your other apps, choose CABLE Output as your mic."));
   CHECK(Contains(done.content, "click ^ (Show hidden icons)"));
   CHECK(Contains(done.content, "It pauses while OBS is open"));
   CHECK(done.check == std::format("Start {} with Windows", kDisplayName) && done.checked);
@@ -353,7 +353,7 @@ TEST(CableThatIsntACable) {
   CHECK(first_run.Click(kButtonNext, kChoiceFirst + 2, false, snapshot).kind == Kind::kNone);
   CHECK(first_run.Page(snapshot) == Page::kDone);
   CHECK(first_run.View(snapshot).content.starts_with("Mic/Aux › Noise Suppression › Noise Gate › Compressor › "
-                                                     "Limiter › Headphones\n\nIn Discord, Zoom and other apps, "
+                                                     "Limiter › Headphones\n\nIn your other apps, "
                                                      "choose the recording side of Headphones as your mic."));
 
   // A cable of knobs's own is no question.

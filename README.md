@@ -10,7 +10,7 @@
 **Your OBS mic chain, without OBS.**
 
 A Windows tray app that runs the mic filter chain you tuned in OBS Studio and sends it to a virtual audio cable.<br>
-Discord, Zoom and games get the same processed mic while OBS stays closed.
+Your other apps get the same processed mic while OBS stays closed.
 
 [![Release](https://img.shields.io/github/v/release/danielalyoshin/knobs?include_prereleases&sort=semver&label=release&color=5c5f66&labelColor=33353a)](https://github.com/danielalyoshin/knobs/releases/latest)
 [![CI](https://img.shields.io/github/actions/workflow/status/danielalyoshin/knobs/ci.yml?branch=main&label=CI&labelColor=33353a)](https://github.com/danielalyoshin/knobs/actions/workflows/ci.yml)
@@ -27,7 +27,7 @@ Discord, Zoom and games get the same processed mic while OBS stays closed.
 <br>
 
 > [!NOTE]
-> **knobs is new.** It works end to end and has been tested on real hardware with OBS 32.2.2, an Audient iD4, VB-Cable and Discord, but few people have run it yet. If something doesn't work, [open an issue](https://github.com/danielalyoshin/knobs/issues).
+> **knobs is new.** It works end to end and has been tested on real hardware with OBS 32.2.2, an Audient iD4 and VB-Cable, but few people have run it yet. If something doesn't work, [open an issue](https://github.com/danielalyoshin/knobs/issues).
 
 ## Why knobs
 
@@ -134,10 +134,10 @@ knobs then lives in the tray. Windows 11 hides new tray icons, so click **^** (S
 
 ### 4. Choose the cable in your apps
 
-In Discord, Zoom, your games and your browser, choose the cable's recording side as your mic. For VB-Cable, that's **CABLE Output**.
+In your other apps, choose the cable's recording side as your mic. For VB-Cable, that's **CABLE Output**.
 
 > [!TIP]
-> Apps can process your mic again on top of your chain. Discord, for one, has its own noise suppression, echo cancellation and automatic gain control in **Voice & Video**. Turn them off to hear exactly what you tuned.
+> Apps can process your mic again on top of your chain, with noise suppression, echo cancellation or automatic gain control of their own. Turn those off in each app's audio settings to hear exactly what you tuned.
 
 ## Using knobs
 

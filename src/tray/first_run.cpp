@@ -525,7 +525,7 @@ PageView Done(const core::Snapshot& snapshot, bool start_checked) {
   chain.cable = ShortDeviceName(chain.cable);
   view.content = std::format(
       "{0}\n\n"
-      "In Discord, Zoom and other apps, choose {1} as your mic.\n\n"
+      "In your other apps, choose {1} as your mic.\n\n"
       "{2} runs in the tray, next to the clock. If you don't see its icon, click ^ (Show hidden icons). {3}",
       core::FormatChain(chain, false),
       side.empty() ? std::format("the recording side of {}", chain.cable) : side, kDisplayName,

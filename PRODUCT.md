@@ -8,7 +8,7 @@ windows
 
 ## Users
 
-Windows users who want a processed mic (noise suppression, gate, expander, compressor, limiter) in Discord, Zoom, games and the browser. Two groups, both primary:
+Windows users who want a processed mic (noise suppression, gate, expander, compressor, limiter) in every app they use it in. Two groups, both primary:
 
 - **OBS users with a tuned chain.** Streamers, podcasters and gamers, many with an XLR mic, who already tuned a filter chain in OBS and route it to a virtual cable. Today they keep OBS open all day to do that. They know OBS and its filters.
 - **People new to OBS.** People who install OBS only to tune a mic for knobs. They don't know OBS's filters or how to build a chain, so knobs has to explain that setup.
