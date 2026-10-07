@@ -185,16 +185,6 @@ knobs collects nothing and sends nothing. It has no telemetry, no account and no
 
 knobs keeps its settings and logs on your PC, in the folders under [Using knobs](#using-knobs). The log names your audio devices, your OBS mic and its filters, and folders on your PC, which can include your Windows user name. Look it over before you attach it to an issue.
 
-## Roadmap
-
-- [x] Run OBS's own filters, with output bit-identical to OBS's
-- [x] Import the mic and its chain from OBS's settings
-- [x] Tray app, first run and notifications
-- [x] Installer and portable zip
-- [ ] OBS 33.0, after its release
-
-Ideas for later, not promised: VST filters, NVIDIA noise removal, push-to-talk, and switching between chains. [docs/design.md](docs/design.md#ideas-for-later) has the list.
-
 ## Development
 
 ### Building
