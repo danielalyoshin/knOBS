@@ -30,7 +30,7 @@ constexpr std::string_view kGainId = "gain_filter";
 // What ImportedMic::chain_key leaves out of a saved source (obs.c,
 // obs_save_source).
 constexpr std::array<const char*, 17> kKeysTheCableIgnores = {
-    // The monitor ignores these (M1 findings), in OBS too.
+    // The monitor ignores these (docs/design.md, M1 findings), in OBS too.
     "muted", "push-to-mute", "push-to-mute-delay", "push-to-talk", "push-to-talk-delay", "enabled", "sync",
     // knobs sets these itself.
     "monitoring_type", "monitoring_enabled", "hotkeys",
@@ -154,7 +154,8 @@ std::optional<MicCandidate> AsMic(const runtime::ObsApi& api, obs_data_t* source
   DataPtr settings = Own(api, api.obs_data_get_obj(source, "settings"));
   mic.device_id = settings ? String(api, settings.get(), "device_id") : "";
   if (mic.device_id.empty()) mic.device_id = "default";  // win-wasapi's default.
-  // OBS 33 saves monitoring on or off as its own key (plan.md, OBS 33.0 notes).
+  // OBS 33 saves monitoring on or off as its own key (docs/design.md, OBS 33.0
+  // notes).
   mic.monitored = api.obs_data_get_int(source, "monitoring_type") != OBS_MONITORING_TYPE_NONE ||
                   api.obs_data_get_bool(source, "monitoring_enabled");
   ArrayPtr filters = Own(api, api.obs_data_get_array(source, "filters"));

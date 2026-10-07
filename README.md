@@ -18,7 +18,7 @@ Discord, Zoom and games get the same processed mic while OBS stays closed.
 [![OBS Studio 32.2](https://img.shields.io/badge/OBS%20Studio-32.2-5c5f66?labelColor=33353a)](#requirements)
 [![License: GPL-2.0-or-later](https://img.shields.io/badge/license-GPL--2.0--or--later-5c5f66?labelColor=33353a)](LICENSE)
 
-[Download](https://github.com/danielalyoshin/knobs/releases/latest) · [Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design plan](plan.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
+[Download](https://github.com/danielalyoshin/knobs/releases/latest) · [Setup](#setup) · [How it works](#how-it-works) · [Known limits](#known-limits) · [Design](docs/design.md) · [Issues](https://github.com/danielalyoshin/knobs/issues)
 
 <sub>An independent project. Not affiliated with or endorsed by the OBS Project.</sub>
 
@@ -52,7 +52,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 | Threads | 7–9 | 90–98 |
 | GPU | None | 0.05% |
 
-<sub>Measured on one PC (Core Ultra 7 265K) with OBS 32.2.2, an Audient iD4 and VB-Cable. [plan.md](plan.md#m3-test-on-real-hardware-obs-3222) has the method.</sub>
+<sub>Measured on one PC (Core Ultra 7 265K) with OBS 32.2.2, an Audient iD4 and VB-Cable. [docs/design.md](docs/design.md#m3-test-on-real-hardware-obs-3222) has the method.</sub>
 
 ## How it works
 
@@ -187,7 +187,7 @@ In Discord, Zoom, your games and your browser, choose the cable's recording side
 - [x] Installer and portable zip
 - [ ] OBS 33.0, after its release
 
-Ideas for later, not promised: VST filters, NVIDIA noise removal, push-to-talk, and switching between chains. [plan.md](plan.md#8-future-ideas-v2) has the list.
+Ideas for later, not promised: VST filters, NVIDIA noise removal, push-to-talk, and switching between chains. [docs/design.md](docs/design.md#ideas-for-later) has the list.
 
 ## Development
 
@@ -209,7 +209,7 @@ The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\
 
 `packaging\package.ps1` packages the Release build as the installer and the portable zip, with their checksums, in `build\package\`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
-[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) once it's set up (`packaging\sign.ps1`, and plan.md's Code signing section).
+[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) once it's set up ([docs/releasing.md](docs/releasing.md#code-signing)).
 
 ### Dev tools
 
@@ -238,9 +238,10 @@ Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic
 | `src/tray` | The tray app: menu, first run, notifications and settings |
 | `tools/` | The dev tools |
 | `packaging/` | The installer's script, the files that ship in each package, and the script that builds both |
+| `docs/` | The design and its measurements, and how a release is made |
 | `tests/` | Unit tests, and the import and core tests on made-up OBS settings |
 
-[plan.md](plan.md) has the design, what was measured and why, and the milestones.
+[docs/design.md](docs/design.md) has the design, and what was measured and why. [docs/releasing.md](docs/releasing.md) has packaging, code signing and how a release is made.
 
 ## Contributing
 

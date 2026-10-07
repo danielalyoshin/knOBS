@@ -29,7 +29,7 @@ struct ObsProcess {
 };
 
 // Tells whether OBS is running in this Windows session, cheaply enough to
-// ask every second. Two signals (plan.md, M3 findings):
+// ask every second. Two signals (docs/design.md, M3 findings):
 //  - OBS creates a named mutex as soon as it starts, before its window or any
 //    module, and holds it until it has saved its settings
 //    (frontend/obs-main.cpp, CheckIfAlreadyRunning). The name is the

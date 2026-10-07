@@ -78,7 +78,7 @@ Notice MicMissing(const core::Snapshot& snapshot) {
   const import::MicCandidate* picked = PickedMic(snapshot);
   const bool is_default = picked && SameId(picked->device_id, kDefaultDevice);
   if (MicConnected(snapshot)) {
-    // The core's watchdog saw no audio (plan.md, The always-on core).
+    // The core's watchdog saw no audio (docs/design.md, The always-on core).
     notice.text = std::format("{} stopped sending audio. {} keeps trying to start it again.", mic, kDisplayName);
   } else if (is_default) {
     notice.text = std::format("There's no recording device. {} starts again when one is connected.", kDisplayName);

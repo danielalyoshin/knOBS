@@ -21,17 +21,17 @@ namespace knobs::core {
 // when a chain has started (Timing::clock). Not thread-safe; the Core runs
 // it on one thread.
 //
-// After every event it works out the state from what it knows, in this
-// order: problems with OBS, its settings or the import; a chain that failed
-// to start; paused by the user; paused while OBS runs, unless
-// Settings::pause_for_obs is off; the cable missing; the mic missing. The
-// chain runs only while the state is kRunning. Every other state releases
-// it, which frees the mic and the cable, and the next kRunning loads it
-// again with libobs's loader (plan.md, M3 findings). A re-import while the
-// chain runs reloads it only if the chain changed (ChainPlan::SameAs). While
-// the chain runs, a watchdog checks that it gets audio, and the monitor is
-// restarted now and then while the output is silent, so the delay to the
-// cable can't creep up (Timing).
+// After every event it works out the state from what it knows, in this order:
+// problems with OBS, its settings or the import; a chain that failed to start;
+// paused by the user; paused while OBS runs, unless Settings::pause_for_obs is
+// off; the cable missing; the mic missing. The chain runs only while the state
+// is kRunning. Every other state releases it, which frees the mic and the
+// cable, and the next kRunning loads it again with libobs's loader
+// (docs/design.md, M3 findings). A re-import while the chain runs reloads it
+// only if the chain changed (ChainPlan::SameAs). While the chain runs, a
+// watchdog checks that it gets audio, and the monitor is restarted now and then
+// while the output is silent, so the delay to the cable can't creep up
+// (Timing).
 class Controller {
  public:
   using Clock = std::chrono::steady_clock;
@@ -47,7 +47,8 @@ class Controller {
     // How often the watchdog checks that the running chain gets audio.
     Clock::duration watchdog_interval = std::chrono::seconds(1);
     // A chain with no audio for this long has stalled: win-wasapi stopped
-    // capturing, and without video nothing restarts it (M3 findings).
+    // capturing, and without video nothing restarts it (docs/design.md, M3
+    // findings).
     Clock::duration stall_timeout = std::chrono::seconds(3);
     // How long to wait before rebuilding a stalled chain, after the first
     // stall, the second, and so on. The last one repeats.
@@ -56,14 +57,14 @@ class Controller {
                                                  std::chrono::seconds(60)};
     // A chain that has had audio for this long starts the waits over.
     Clock::duration healthy_after = std::chrono::seconds(30);
-    // Restarting the monitor (plan.md, Long-run latency). libobs's monitor
-    // doesn't correct its delay for a mic: a hiccup raises it, and a mic
-    // whose clock runs faster than the cable's raises it steadily, until the
-    // monitor's 1 s buffer overflows. A restart opens a fresh stream, at the
-    // least delay. Not sooner than this after the chain started or last
+    // Restarting the monitor (docs/design.md, Long-run latency). libobs's
+    // monitor doesn't correct its delay for a mic: a hiccup raises it, and a
+    // mic whose clock runs faster than the cable's raises it steadily, until
+    // the monitor's 1 s buffer overflows. A restart opens a fresh stream, at
+    // the least delay. Not sooner than this after the chain started or last
     // restarted: the iD4's clock and VB-Cable's are 31.5 ppm apart, and a mic
-    // that much faster than its cable adds 19 ms in 10 min, two engine
-    // periods. Where a restart lands varies by about one...
+    // that much faster than its cable adds 19 ms in 10 min, two engine periods.
+    // Where a restart lands varies by about one...
     Clock::duration monitor_restart_every = std::chrono::minutes(10);
     // ...and only once the chain's output has been silent for this long, so
     // the gap a restart leaves falls in silence.

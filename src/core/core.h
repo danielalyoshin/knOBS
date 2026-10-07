@@ -29,9 +29,9 @@ struct CoreOptions {
   // OBS running in other Windows sessions, asked right after obs_running.
   // Default: the same ObsWatch's; none when obs_running is given without it.
   std::function<std::vector<OtherObs>()> other_obs;
-  // How often to ask. OBS takes more than a second and a half from starting
-  // to loading its audio sources (M3 findings), so a second is soon enough
-  // to make way for it.
+  // How often to ask. OBS takes more than a second and a half from starting to
+  // loading its audio sources (docs/design.md, M3 findings), so a second is
+  // soon enough to make way for it.
   std::chrono::milliseconds obs_poll{1000};
   // Listen for audio devices coming and going (audio::DeviceWatch).
   bool watch_devices = true;

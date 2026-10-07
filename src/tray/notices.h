@@ -11,7 +11,7 @@
 #include "tray/badge.h"
 #include "tray/first_run.h"
 
-// The tray's notifications as data (plan.md, Tray and first run): which
+// The tray's notifications as data (docs/design.md, Tray and first run): which
 // changes of the core's state get one, what it says, and what a click on it
 // opens. Each says what happened, then what knobs does or what to do. There
 // are none for a normal start, or when OBS opens or closes without changing

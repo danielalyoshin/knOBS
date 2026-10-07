@@ -533,7 +533,7 @@ void CALLBACK OnDialogStep(HWND, UINT, UINT_PTR timer, DWORD) {
   PostMessageW(dialog, WM_CLOSE, 0, 0);
 }
 
-// Task dialogs stay light in either theme (plan.md, Tray and first run).
+// Task dialogs stay light in either theme (docs/design.md, Tray and first run).
 void TakeDialogScreenshot() {
   SetTimer(nullptr, 0, kStepMs, OnDialogStep);
   g_session->app->Execute(g_session->options.dialog);

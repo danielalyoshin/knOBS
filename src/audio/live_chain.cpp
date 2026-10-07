@@ -37,7 +37,7 @@ Result<obs_source_t*> LoadSourceJson(const runtime::ObsApi& api, std::string_vie
   // A source saved as monitored would otherwise open the current monitoring
   // device during the load. The caller decides where audio goes. OBS 33's
   // loader reads monitoring_enabled instead for sources it saved; 32.2
-  // ignores that key (plan.md, OBS 33.0 notes).
+  // ignores that key (docs/design.md, OBS 33.0 notes).
   api.obs_data_set_int(data, "monitoring_type", OBS_MONITORING_TYPE_NONE);
   api.obs_data_set_bool(data, "monitoring_enabled", false);
   obs_source_t* source = api.obs_load_private_source(data);

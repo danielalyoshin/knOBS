@@ -4,7 +4,7 @@
 # makes a draft release with the installer, the portable zip and their
 # checksums. Publish the draft on GitHub once its notes read right.
 #
-# Signing uses Azure Artifact Signing (plan.md, Code signing). It's set up in
+# Signing uses Azure Artifact Signing (docs/releasing.md, Code signing). It's set up in
 # the release environment: the variables ARTIFACT_SIGNING_ENDPOINT,
 # ARTIFACT_SIGNING_ACCOUNT and ARTIFACT_SIGNING_PROFILE, and the secrets
 # AZURE_TENANT_ID and AZURE_CLIENT_ID. Without them, the release is unsigned,
@@ -68,7 +68,7 @@ jobs:
             "signed=true" >> $env:GITHUB_OUTPUT
           } else {
             "signed=false" >> $env:GITHUB_OUTPUT
-            "::warning::Signing isn't set up in the release environment, so this release is unsigned. plan.md, Code signing, has the steps."
+            "::warning::Signing isn't set up in the release environment, so this release is unsigned. docs/releasing.md, Code signing, has the steps."
           }
 
       - name: Install Inno Setup

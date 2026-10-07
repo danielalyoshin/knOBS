@@ -19,7 +19,7 @@ The job for both: tune the mic once, get that sound in every app, and stop think
 
 knobs runs the mic filter chain from the user's OBS settings and sends the result to a virtual audio cable, with no OBS process. The audio goes through the user's own installed OBS filter code.
 
-Success (plan.md §7): with OBS closed and knobs in the tray, the mic sounds identical to OBS in every app. A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
+Success (docs/design.md, Success criteria): with OBS closed and knobs in the tray, the mic sounds identical to OBS in every app. A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
 
 ## Positioning
 
@@ -39,7 +39,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 - No custom DSP and no "improvements". No filter editing in v1, since users tune in OBS. No VST filters in v1. Windows only in v1.
 - Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
 - Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device.
-- The tray menu, first run and tray icon are designed in plan.md (Tray and first run, §4).
+- The tray menu, first run and tray icon are designed in docs/design.md (Tray and first run).
 - Open: an installer or a portable zip (M4).
 
 ## Brand Commitments
@@ -53,7 +53,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Evidence on Hand
 
-- knobs's output is bit-identical to OBS's on test signals and on a recording of real voice (M2, plan.md).
+- knobs's output is bit-identical to OBS's on test signals and on a recording of real voice (docs/design.md, M2 findings).
 - Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (M1, Audient iD4).
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
 - The logo, app icon and lockups in `assets/`.

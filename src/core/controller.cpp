@@ -34,7 +34,7 @@ constexpr float kSilentPeak = 0.0031623f;  // -50 dBFS
 constexpr float kFloorMargin = 1.9953f;  // +6 dB
 // ...unless the floor is that loud. A mic that never gets down to -30 dBFS
 // isn't restarted, and its delay grows until the monitor's buffer overflows,
-// which restarts it too (plan.md, Long-run latency).
+// which restarts it too (docs/design.md, Long-run latency).
 constexpr float kQuietCeiling = 0.031623f;  // -30 dBFS
 
 std::string Dbfs(float peak) {

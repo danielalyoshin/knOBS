@@ -8,9 +8,9 @@
 
 #include "core/state.h"
 
-// The first run as data (plan.md, Tray and first run): which page to show for
-// a snapshot of the core, what the page says and offers, and what each button
-// does. first_run_dialog.cpp shows the pages in one task dialog. Text is
+// The first run as data (docs/design.md, Tray and first run): which page to
+// show for a snapshot of the core, what the page says and offers, and what each
+// button does. first_run_dialog.cpp shows the pages in one task dialog. Text is
 // UTF-8. Content and footers may hold links, <a href="…">as task dialogs take
 // them</a>.
 namespace knobs::tray {

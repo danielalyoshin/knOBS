@@ -13,7 +13,8 @@
 #include "import/mic_import.h"
 #include "runtime/obs_install.h"
 
-// What knobs is doing, as the tray shows it (plan.md, Tray and first run).
+// What knobs is doing, as the tray shows it (docs/design.md, Tray and first
+// run).
 namespace knobs::core {
 
 // knobs's own choices. They override what it imports, and survive
@@ -158,7 +159,7 @@ struct Snapshot {
   std::vector<audio::AudioDevice> outputs;
   // The recording devices that are connected, and the default
   // communications device's ID, which a mic set to "default" records from
-  // (M1 findings).
+  // (docs/design.md, M1 findings).
   std::vector<audio::AudioDevice> inputs;
   std::string default_input;
   // The OBS install, once found, even if its version isn't supported.

@@ -14,8 +14,8 @@
 #include "tray/first_run.h"
 #include "util/result.h"
 
-// The first run's window (plan.md, Tray and first run): one task dialog that
-// shows FirstRun's pages and moves between them with TDM_NAVIGATE_PAGE, as
+// The first run's window (docs/design.md, Tray and first run): one task dialog
+// that shows FirstRun's pages and moves between them with TDM_NAVIGATE_PAGE, as
 // the user clicks and as the core's state changes.
 namespace knobs::tray {
 

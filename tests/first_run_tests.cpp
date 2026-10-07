@@ -548,7 +548,7 @@ TEST(SecondDoorListsTheStepsInOBSWords) {
   first_run.Click(kButtonNewToObs, 0, false, snapshot);
   PageView view = first_run.View(snapshot);
   CHECK(view.page == Page::kSteps && view.instruction == "Set up your mic in OBS");
-  // As OBS 32.2.2 names them (plan.md, Tray and first run).
+  // As OBS 32.2.2 names them (docs/design.md, Tray and first run).
   CHECK(Contains(view.content, "\n1. Open OBS.\n"));
   CHECK(Contains(view.content, "\n2. In the Audio Mixer, click Mic/Aux and choose Filters.\n"));
   CHECK(Contains(view.content, "\n3. Under Audio Filters, click + and add filters as needed.\n"));
