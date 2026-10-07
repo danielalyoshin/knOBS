@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 cmake_minimum_required(VERSION 3.25)
-project(knobs VERSION 0.0.1 LANGUAGES CXX)
+project(knobs VERSION 0.1.0 LANGUAGES CXX)
 
 if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8 OR NOT MSVC)
   message(FATAL_ERROR "This project builds with MSVC for 64-bit Windows only.")
