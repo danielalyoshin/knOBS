@@ -1,6 +1,6 @@
 # knobs design
 
-How knobs works and why: its architecture, what OBS's source and measurements on real hardware showed, and the decisions they led to. The [README](../README.md) has the short version, and [releasing.md](releasing.md) covers packaging, code signing and releases.
+How knobs works and why: its architecture, what OBS's source and measurements on real hardware showed, and the decisions they led to. The [README](../README.md) has the short version.
 
 Behavior that comes from OBS was checked against the obs-studio source at the tag of the tested version, OBS 32.2.2. Dates are when a decision was made.
 
