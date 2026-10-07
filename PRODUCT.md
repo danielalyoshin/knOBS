@@ -35,12 +35,12 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Capabilities and Constraints
 
-- Done (M0 to M2): loading libobs from a private copy of the OBS install, importing the mic and its filters, the live path into the cable, and the comparison with OBS. Next: the tray app (M3), then packaging (M4).
+- Built: loading libobs from a private copy of the OBS install, importing the mic and its filters, the live path into the cable, the comparison with OBS, and the tray app with its first run, notifications and icon badges. Next: the first release.
 - No custom DSP and no "improvements". No filter editing in v1, since users tune in OBS. No VST filters in v1. Windows only in v1.
 - Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
 - Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device.
 - The tray menu, first run and tray icon are designed in docs/design.md (Tray and first run).
-- Open: an installer or a portable zip (M4).
+- Distribution: an installer (for the current user, no admin rights) and a portable zip that keeps its data beside the exe, from GitHub releases. Releases are signed with Azure Artifact Signing once it's set up; until then SmartScreen warns on first run.
 
 ## Brand Commitments
 
@@ -49,15 +49,19 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 - **Logo:** the knob mark (a dark knob with a red pointer, original artwork), the app icon and the horizontal lockup, in `assets/`. Don't recolor, rotate or stretch the knob. Usage rules are in `assets/README.md`.
 - **Logo colors:** ink `#17181b` on light and `#e8eaee` on dark. Red `#d63c42` on light and `#e5484d` on dark, for the pointer and "obs" in the wordmark. The knob's ticks are `#e8eaee`, a light tone of the knob's cool graphite. No cream (decided 2026-10-05). The app icon is the knob alone, with no tile (decided 2026-10-05).
 - **Red "obs" in the wordmark:** kept on purpose (decided 2026-10-05), although the rename to knobs dropped "OBS" from the name. If the OBS team objects, revisit it, as with the name.
+- **Tray badges:** discs in the logo's colors: a white "!" on the red `#e5484d` and white pause bars on the graphite `#4a4c52`, 7/16 of the icon (decided 2026-10-07, replacing Windows 11's yellow and gray).
+- **Logo license:** the files in `assets/` are all rights reserved, outside the GPL that covers the code. `TRADEMARKS.md` says how the name and logo may be used; forks need their own (decided 2026-10-07).
 - **Independence:** knobs isn't affiliated with or endorsed by the OBS Project. Say so wherever knobs is presented.
 
 ## Evidence on Hand
 
 - knobs's output is bit-identical to OBS's on test signals and on a recording of real voice (docs/design.md, M2 findings).
 - Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (M1, Audient iD4).
+- On real hardware (docs/design.md, M3 test on real hardware): running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
 - The logo, app icon and lockups in `assets/`.
-- Not on hand, and not to be made up: users, testimonials, download counts, screenshots of the tray app (it doesn't exist yet), a website.
+- Pictures of the tray menu, first run, notifications and icon: `knobs-tray --screenshot` and `--icons` take them on its fake core, whose state is made up but realistic.
+- Not on hand, and not to be made up: users, testimonials, download counts, a website.
 
 ## Product Principles
 
