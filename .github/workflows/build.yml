@@ -1,0 +1,61 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+#
+# Builds knobs, runs every test against a real OBS Studio, and packages the
+# installer and the portable zip. CI and Release call it.
+name: Build
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  # The OBS the tests load libobs from: the tested version (src/runtime/obs_version.h).
+  OBS_VERSION: 32.2.2
+  OBS_INSTALLER_SHA256: c3a0b880adbe64dc4bcb68f93016916ab5b55ae43fd227115287bf80257d92dc
+  INNO_SETUP_VERSION: 6.7.1
+
+jobs:
+  build:
+    name: Build, test and package
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure
+        run: cmake --preset x64
+
+      - name: Build
+        run: cmake --build --preset release
+
+      - name: Install OBS Studio
+        # The smoke, harness, import and core tests load libobs from it. None of
+        # them opens an audio device, and the runner has none.
+        run: |
+          $installer = "$env:RUNNER_TEMP\obs-setup.exe"
+          $url = "https://github.com/obsproject/obs-studio/releases/download/$env:OBS_VERSION/OBS-Studio-$env:OBS_VERSION-Windows-x64-Installer.exe"
+          Invoke-WebRequest $url -OutFile $installer
+          $hash = (Get-FileHash -Algorithm SHA256 $installer).Hash.ToLower()
+          if ($hash -ne $env:OBS_INSTALLER_SHA256) { throw "OBS's installer has an unexpected checksum: $hash" }
+          Start-Process $installer -ArgumentList '/S' -Wait
+          if (-not (Test-Path "$env:ProgramFiles\obs-studio\bin\64bit\obs.dll")) { throw "OBS didn't install." }
+
+      - name: Test
+        # With OBS installed, a skipped test is a failure.
+        run: |
+          ctest --preset release 2>&1 | Tee-Object -Variable log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          if ($log -match 'Skipped') { throw 'A test skipped although OBS is installed.' }
+
+      - name: Install Inno Setup
+        run: choco install innosetup --version $env:INNO_SETUP_VERSION --yes --no-progress
+
+      - name: Package
+        run: ./packaging/package.ps1
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: build/package/
+          if-no-files-found: error
