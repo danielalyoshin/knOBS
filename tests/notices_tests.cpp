@@ -768,21 +768,21 @@ TEST(BadgesSitInTheCorner) {
       // The icon's top left is untouched; the badge's middle is opaque and
       // something else; the ring around the badge is clear.
       CHECK(At(badged, 0, 0) == 0xff808080 && At(badged, size / 3, size / 3) == 0xff808080);
-      const float radius = std::round(size * 9.0f / 16) / 2;
+      const float radius = std::round(size * 7.0f / 16) / 2;
       const float center = size - radius;
       const float gap = std::max(1.0f, std::round(size / 16.0f));
       const int middle = static_cast<int>(center);
       CHECK(Alpha(At(badged, middle, middle)) == 255 && At(badged, middle, middle) != 0xff808080);
       CHECK(Alpha(At(badged, static_cast<int>(center - radius - gap / 2), middle)) < 128);
     }
-    // Windows 11's caution and neutral colors, beside the mark.
+    // The logo's red and the knob's graphite, beside the mark.
     const auto fill = [&](Badge badge) {
       const IconPixels badged = AddBadge(icon, badge);
-      const float radius = std::round(size * 9.0f / 16) / 2;
+      const float radius = std::round(size * 7.0f / 16) / 2;
       const float center = size - radius;
       return At(badged, static_cast<int>(center - 0.6f * radius), static_cast<int>(center + 0.3f * radius)) & 0xffffff;
     };
-    CHECK(fill(Badge::kAttention) == 0xfce100 && fill(Badge::kPaused) == 0x9d9d9d);
+    CHECK(fill(Badge::kAttention) == 0xe5484d && fill(Badge::kPaused) == 0x4a4c52);
   }
 }
 

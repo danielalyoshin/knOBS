@@ -16,20 +16,19 @@ constexpr Color Rgb(uint32_t rgb) {
   return {((rgb >> 16) & 0xff) / 255.0f, ((rgb >> 8) & 0xff) / 255.0f, (rgb & 0xff) / 255.0f};
 }
 
-// Windows 11's status badge colors, as WinUI's InfoBadge and InfoBar use
-// them in dark mode: SystemFillColorCaution for "!" and
-// SystemFillColorSolidNeutral for pause, both with a black mark. The same on
-// a light taskbar (decided 2026-10-05).
+// The logo's colors (assets/README.md): its red for "!" and the knob's
+// graphite for pause, both with a white mark. The same on a light and a dark
+// taskbar (decided 2026-10-07).
 struct Palette {
   Color fill;
   Color mark;
 };
 
 Palette Colors(Badge badge) {
-  return {Rgb(badge == Badge::kAttention ? 0xfce100 : 0x9d9d9d), Rgb(0x000000)};
+  return {Rgb(badge == Badge::kAttention ? 0xe5484d : 0x4a4c52), Rgb(0xffffff)};
 }
 
-constexpr float kBadge = 0.5625f;  // Of the icon's size: 9 px at 16.
+constexpr float kBadge = 0.4375f;  // Of the icon's size: 7 px at 16.
 
 // How much of a pixel a shape covers, from the signed distance of the
 // pixel's center to the shape's edge, in pixels (negative inside).
@@ -56,9 +55,9 @@ int WithParity(float value, bool odd) {
   return std::max(odd ? 1 : 2, whole);
 }
 
-// The badge's mark, as coverage of each of the icon's pixels: Windows 11's
-// "!" and pause in proportion, with whole-pixel strokes, so they stay crisp
-// at tray sizes.
+// The badge's mark, as coverage of each of the icon's pixels: a "!" and two
+// pause bars of the same stroke, whole pixels wide, so they stay crisp at
+// tray sizes.
 std::vector<float> Mark(Badge badge, int size, int diameter) {
   std::vector<float> mark(static_cast<size_t>(size) * size, 0.0f);
   const bool odd = diameter % 2 != 0;
@@ -77,24 +76,27 @@ std::vector<float> Mark(Badge badge, int size, int diameter) {
       }
     }
   };
+  // The stroke of both marks: 1 px up to 24 px, 2 at 32.
+  const int stroke = WithParity(diameter * 0.18f, odd);
   if (badge == Badge::kAttention) {
-    // A stem and a dot a stroke apart, about half the badge tall.
-    const int stroke = WithParity(diameter * 0.11f, odd);
-    const int height = WithParity(diameter * 0.56f, odd);
+    // A stem and a dot, about 70% of the badge tall. The stem stays longer
+    // than the dot at any size, and the mark inside the disc.
+    const int gap = std::max(1, static_cast<int>(std::lround(stroke * 0.55f)));
+    const float shortest = static_cast<float>(2 * stroke + gap + 1);
+    const int height = std::min(WithParity(std::max(diameter * 0.702f, shortest), odd), diameter - 2);
     const int left = corner + (diameter - stroke) / 2;
     const int top = corner + (diameter - height) / 2;
-    fill(left, top, stroke, height - 2 * stroke, true);
+    fill(left, top, stroke, height - stroke - gap, true);
     fill(left, top + height - stroke, stroke, stroke, true);
   } else {
-    // Two solid bars, as Windows' pause glyph has them.
-    const int bar = std::max(1, static_cast<int>(std::lround(diameter * 0.18f)));
-    int gap = std::max(1, static_cast<int>(std::lround(diameter * 0.12f)));
-    if (((2 * bar + gap) % 2 != 0) != odd) ++gap;
-    const int height = WithParity(diameter * 0.5f, odd);
-    const int left = corner + (diameter - (2 * bar + gap)) / 2;
+    // Two bars half the badge tall.
+    int gap = std::max(1, static_cast<int>(std::lround(diameter * 0.126f)));
+    if (((2 * stroke + gap) % 2 != 0) != odd) ++gap;
+    const int height = WithParity(diameter * 0.504f, odd);
+    const int left = corner + (diameter - (2 * stroke + gap)) / 2;
     const int top = corner + (diameter - height) / 2;
-    fill(left, top, bar, height, true);
-    fill(left + bar + gap, top, bar, height, true);
+    fill(left, top, stroke, height, true);
+    fill(left + stroke + gap, top, stroke, height, true);
   }
   return mark;
 }

@@ -10,11 +10,11 @@
 // The tray icon's badges (plan.md, Tray and first run): the knob alone while
 // knobs runs, a pause badge while it's paused, and a "!" while the cable gets
 // no mic and that needs the user. Notifications can be hidden (Do Not
-// Disturb), so the icon shows the state too. They're Windows 11's own status
-// badges: its caution yellow and its neutral gray, with a black "!" and pause
-// bars in their proportions, the same on a light and a dark taskbar. The
-// badge is drawn over the icon's bottom-right corner, with a clear ring that
-// lets the taskbar show between the two. The knob itself isn't recolored.
+// Disturb), so the icon shows the state too. They're discs in the logo's
+// colors: a white "!" on its red, and white pause bars on the knob's graphite,
+// the same on a light and a dark taskbar. The badge is drawn over the icon's
+// bottom-right corner, 7/16 of its size, with a clear ring that lets the
+// taskbar show between the two. The knob itself isn't recolored.
 namespace knobs::tray {
 
 enum class Badge { kNone, kPaused, kAttention };
