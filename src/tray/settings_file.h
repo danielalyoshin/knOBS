@@ -8,7 +8,8 @@
 #include "tray/first_run.h"
 #include "util/result.h"
 
-// knobs's settings, kept in %AppData%\knobs\settings.ini:
+// knobs's settings, kept in %AppData%\knobs\settings.ini, or in the data
+// folder of a portable copy (AppDirs):
 //
 //   [OBS]
 //   Install=D:\\Games\\obs-studio

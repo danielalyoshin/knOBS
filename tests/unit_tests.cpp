@@ -41,6 +41,7 @@
 #include "runtime/pe_imports.h"
 #include "runtime/runtime_copy.h"
 #include "test_harness.h"
+#include "util/app_dirs.h"
 #include "util/json.h"
 #include "util/win_strings.h"
 
@@ -767,6 +768,32 @@ TEST(ConfigRootIsPortableWithAMarker) {
   CHECK(import::ObsConfigRootAt(dir.path / L"CONFIG" / L"").path == dir.path / L"CONFIG");
   CHECK(!import::ObsConfigRootAt(dir.path / L"settings").portable);
   CHECK(!import::ObsConfigRootAt(dir.path).portable);
+}
+
+TEST(PortableMarkerKeepsKnobsBesideItsExe) {
+  TempDir dir(L"knobs-portable");
+  const fs::path roaming = dir.path / L"Roaming";
+  const fs::path local = dir.path / L"Local";
+  const fs::path exe_folder = dir.path / L"knobs";
+  fs::create_directories(exe_folder);
+
+  const AppDirs installed = AppDirsFor(exe_folder, roaming, local);
+  CHECK(!installed.portable && installed.roaming == roaming / kDisplayNameW);
+  CHECK(installed.local == local / kDisplayNameW);
+
+  WriteFile(exe_folder / kPortableMarker, "");
+  const AppDirs portable = AppDirsFor(exe_folder, roaming, local);
+  CHECK(portable.portable && portable.roaming == exe_folder / L"data" && portable.local == exe_folder / L"data");
+  CHECK(portable.RuntimeBase() == exe_folder / L"data" / L"runtime");
+  CHECK(portable.Logs() == exe_folder / L"data" / L"logs");
+
+  // OBS's settings stay where OBS keeps them.
+  auto app_data = UserAppData();
+  CHECK(app_data.ok() && !app_data->empty());
+  // A folder named like the marker isn't one.
+  fs::remove(exe_folder / kPortableMarker);
+  fs::create_directories(exe_folder / kPortableMarker);
+  CHECK(!AppDirsFor(exe_folder, roaming, local).portable);
 }
 
 TEST(SettingsFolderIsTheOneAboveObsStudio) {

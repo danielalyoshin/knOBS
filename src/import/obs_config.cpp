@@ -87,10 +87,10 @@ Result<ProfileAudio> ReadProfileAudio(const ObsIni& basic, const fs::path& file)
 
 Result<ObsConfigRoot> FindObsConfigRoot(const fs::path& install_root) {
   if (IsPortableInstall(install_root)) return ObsConfigRoot{install_root / L"config", true, true};
-  auto dirs = GetAppDirs();
-  if (!dirs) return Error{dirs.error()};
-  // %AppData%, the parent of knobs's own roaming folder.
-  return ObsConfigRoot{dirs->roaming.parent_path(), false, true};
+  // %AppData%, even for a portable knobs.
+  auto app_data = UserAppData();
+  if (!app_data) return Error{app_data.error()};
+  return ObsConfigRoot{*app_data, false, true};
 }
 
 ObsConfigRoot ObsConfigRootAt(const fs::path& folder) {

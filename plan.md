@@ -482,6 +482,7 @@ Checked against libobs's monitor (`audio-monitoring/win32/wasapi-output.c`), `ob
 ### Revision notes — Rev 24 (2026-10-07)
 
 - The tray badges are the logo's colors instead of Windows 11's: a white "!" on red and white pause bars on graphite, on a smaller disc (7/16 of the icon), with the bars as thin as the "!" (Built: notifications).
+- A portable copy: a `portable_mode.txt` beside the exe, as OBS's file of that name, keeps all of knobs's state in a `data` folder beside it (`AppDirsFor`). OBS's settings are still read from `%AppData%`.
 
 ### Revision notes — Rev 23 (2026-10-06)
 
