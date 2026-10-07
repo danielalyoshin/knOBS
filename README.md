@@ -179,6 +179,12 @@ In your other apps, choose the cable's recording side as your mic. For VB-Cable,
 - **A new sample rate or channel layout in OBS restarts knobs**, as it restarts OBS, with a moment of silence.
 - **Windows only, and OBS 32.2.x only,** for now.
 
+## Privacy
+
+knobs collects nothing and sends nothing. It has no telemetry, no account and no update check, and it makes no network connections: the links in its first run open in your browser when you click them. Your mic's audio goes from the mic, through OBS's filters, to the virtual cable, and stays on your PC.
+
+knobs keeps its settings and logs on your PC, in the folders under [Using knobs](#using-knobs). The log names your audio devices, your OBS mic and its filters, and folders on your PC, which can include your Windows user name. Look it over before you attach it to an issue.
+
 ## Roadmap
 
 - [x] Run OBS's own filters, with output bit-identical to OBS's
