@@ -5,8 +5,9 @@ Renders the installer's wizard images from the logo's SVG masters.
 
 .DESCRIPTION
 Writes assets\installer\:
-  wizard-<width>.png  the large image, on the "Completing setup" page: the knob
-                      mark, centered on the knob's light graphite (#e8eaee)
+  wizard-<width>.png  the large image, on the "Completing setup" page: the
+                      stacked lockup, centered on the knob's light graphite
+                      (#e8eaee)
   small-<size>.png    the small image, top right on the other pages: the app
                       icon, on a transparent ground
 at each size Inno Setup 6 asks for, from 100% to 250% display scaling. Setup
@@ -119,10 +120,12 @@ $supersample = 8
 $wizardSizes = @(@(202, 386), @(269, 515), @(336, 643), @(403, 772), @(430, 824), @(498, 953), @(534, 1022))
 $smallSizes = @(58, 77, 97, 116, 124, 143, 159)
 $panel = [System.Drawing.ColorTranslator]::FromHtml('#e8eaee')
-# The mark's width on the large image, and its center's height, as fractions of the image.
-$markWidth = 0.62
-$markCenter = 0.42
-$markAspect = 200.0 / 152.0  # knobs-mark.svg's viewBox.
+# The lockup's width on the large image, and its center's height, as fractions of the image.
+$lockup = "$root\assets\knobs-lockup-stacked-dark.svg"
+$lockupWidth = 0.72
+$lockupCenter = 0.44
+$viewBox = [regex]::Match((Get-Content -Raw $lockup), 'viewBox="0 0 ([\d.]+) ([\d.]+)"')
+$lockupAspect = [double]$viewBox.Groups[1].Value / [double]$viewBox.Groups[2].Value
 
 $edge = @(
     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
@@ -188,15 +191,15 @@ try {
     New-Item -ItemType Directory -Force $Out | Out-Null
 
     $markBoxes = foreach ($size in $wizardSizes) {
-        $w = [int][math]::Round($size[0] * $markWidth)
-        , @($w, [int][math]::Round($w / $markAspect))
+        $w = [int][math]::Round($size[0] * $lockupWidth)
+        , @($w, [int][math]::Round($w / $lockupAspect))
     }
-    $marks = Render-Pixels "$root\assets\knobs-mark.svg" $markBoxes
+    $marks = Render-Pixels $lockup $markBoxes
     for ($i = 0; $i -lt $wizardSizes.Count; $i++) {
         $width = $wizardSizes[$i][0]; $height = $wizardSizes[$i][1]
         $box = $markBoxes[$i]
         $x = [int][math]::Round(($width - $box[0]) / 2)
-        $y = [int][math]::Round($height * $markCenter - $box[1] / 2)
+        $y = [int][math]::Round($height * $lockupCenter - $box[1] / 2)
         $image = [SvgRender]::Compose($marks[$i], $box[0], $box[1], $width, $height, $x, $y, $panel)
         $image.Save((Join-Path $Out "wizard-$width.png"), [System.Drawing.Imaging.ImageFormat]::Png)
         $image.Dispose()

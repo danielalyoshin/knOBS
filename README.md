@@ -1,7 +1,7 @@
 <h1 align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/knobs-lockup-horizontal-light.svg">
-    <img src="assets/knobs-lockup-horizontal-dark.svg" alt="knobs" width="340">
+    <img src="assets/knobs-lockup-horizontal-dark.svg" alt="knobs" width="388">
   </picture>
 </h1>
 
