@@ -37,6 +37,13 @@ SetupIconFile=..\assets\knobs.ico
 UninstallDisplayIcon={app}\{#AppName}.exe
 UninstallDisplayName={#AppName}
 WizardStyle=modern
+; The knob, from tools\render-installer-images.ps1, at each display scale's
+; size. Setup picks the one that fits, and centers the large one on its own
+; color rather than stretching it.
+WizardImageFile=..\assets\installer\wizard-202.png,..\assets\installer\wizard-269.png,..\assets\installer\wizard-336.png,..\assets\installer\wizard-403.png,..\assets\installer\wizard-430.png,..\assets\installer\wizard-498.png,..\assets\installer\wizard-534.png
+WizardImageStretch=no
+WizardImageBackColor=#e8eaee
+WizardSmallImageFile=..\assets\installer\small-58.png,..\assets\installer\small-77.png,..\assets\installer\small-97.png,..\assets\installer\small-116.png,..\assets\installer\small-124.png,..\assets\installer\small-143.png,..\assets\installer\small-159.png
 Compression=lzma2/max
 SolidCompression=yes
 ; Setup closes a running knobs itself (PrepareToInstall).

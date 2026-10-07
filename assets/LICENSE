@@ -1,5 +1,6 @@
-The files in this folder (the knobs logo, app icon and lockups) aren't covered by
-the GPL that covers the rest of knobs.
+The files in this folder and its subfolders (the knobs logo, app icon, lockups
+and the installer's images) aren't covered by the GPL that covers the rest of
+knobs.
 
 Copyright (C) 2026 Daniel Alyoshin. All rights reserved, apart from the
 permissions in TRADEMARKS.md, at the root of the repository.

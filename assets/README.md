@@ -7,6 +7,7 @@ The knob mark, the app icon and the horizontal lockup. The SVGs are the masters.
 - `knobs.ico`: the app icon for Windows, for the tray app's exe, its tray icon, its windows and its notifications. It has the small (16 px) and large (32 px) icons at every display scale from 100% to 300%: 16, 20, 24, 28, 32, 36, 40, 48, 56, 64, 72, 80 and 96 px, and 256. `tools/render-icon.ps1 -Svg assets\knobs-app-icon.svg -Out assets\knobs.ico` makes it: headless Edge renders the SVG at 8 times each size, and each 8×8 block is averaged into a pixel, for smooth edges. Sizes below 256 are 32-bit bitmaps, and 256 is a PNG.
 - `knobs-lockup-horizontal-dark.svg`: mark and wordmark with dark text, for light backgrounds.
 - `knobs-lockup-horizontal-light.svg`: mark and wordmark with light text, for dark backgrounds.
+- `installer/`: the installer's images, at each size Inno Setup asks for from 100% to 250% display scaling. `wizard-<width>.png` is the mark centered on `#e8eaee`, for the "Completing setup" page, and `small-<size>.png` the app icon on a transparent ground, top right on the other pages. `tools/render-installer-images.ps1` makes them from the SVGs, as `render-icon.ps1` makes `knobs.ico`.
 
 ## Colors
 
