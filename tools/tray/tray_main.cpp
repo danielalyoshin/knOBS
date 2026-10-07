@@ -514,9 +514,10 @@ void TakeScreenshot() {
   UpdateWindow(session.backdrop);
 
   SetTimer(session.backdrop, 1, kStepMs, OnScreenshotStep);
-  // Menus open to the left of the point when Windows is set for right-handed
-  // pen use (SM_MENUDROPALIGNMENT).
-  const int x = GetSystemMetrics(SM_MENUDROPALIGNMENT) ? left + width - 48 : left + 48;
+  // From the middle, so a submenu fits on the backdrop on either side: menus
+  // open to the left of the point when Windows is set for right-handed pen use
+  // (SM_MENUDROPALIGNMENT), and their submenus to the right.
+  const int x = left + width / 2;
   session.app->ShowMenu({x, work.top + 88});
   DestroyWindow(session.backdrop);
   DeleteObject(brush);
