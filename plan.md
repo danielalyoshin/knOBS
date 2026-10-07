@@ -438,7 +438,7 @@ Built on 2026-10-07 in `packaging/`. `packaging/package.ps1` takes the Release `
 **M4 — Ship**
 - [x] Packaging: small exe (no bundled libobs); simple installer or portable zip. Both, built 2026-10-07 (Packaging in §4).
 - [ ] README with the pitch ("close OBS, keep your mic"), setup guide, VB-Cable pointer, "requires OBS Studio installed" + supported version range. The first run links to the setup guide as the README's `#setup` anchor (`kSetupGuideUrl`). Written 2026-10-06, apart from the download: until packaging lands, Setup builds knobs from source.
-- [ ] GPL-2.0-or-later compliance (links libobs): publish source, include license texts
+- [x] GPL-2.0-or-later compliance (links libobs): publish source, include license texts. Done 2026-10-07: the source is public, and each package has LICENSE.txt and a NOTICE.txt that links this version's source. The logo files in `assets/` are carved out of the GPL, all rights reserved apart from what TRADEMARKS.md allows (decided 2026-10-07).
 - [ ] AI-use disclaimer in the forum post (required by the OBS Forum Resource and IP Policy)
 - [ ] Post to OBS forums / r/obs — this is where the users who asked for this live
 
@@ -490,6 +490,7 @@ Built on 2026-10-07 in `packaging/`. `packaging/package.ps1` takes the Release `
 
 - The tray badges are the logo's colors instead of Windows 11's: a white "!" on red and white pause bars on graphite, on a smaller disc (7/16 of the icon), with the bars as thin as the "!" (Built: notifications).
 - A portable copy: a `portable_mode.txt` beside the exe, as OBS's file of that name, keeps all of knobs's state in a `data` folder beside it (`AppDirsFor`). OBS's settings are still read from `%AppData%`.
+- Packaging: an installer and a portable zip (Packaging, in section 4). The logo files are carved out of the GPL: TRADEMARKS.md says how the name and logo may be used.
 
 ### Revision notes — Rev 23 (2026-10-06)
 

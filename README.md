@@ -244,6 +244,8 @@ If knobs sounds different from OBS, include the output of `knobs-import` and the
 
 ## License
 
-knobs is licensed under **GPL-2.0-or-later**, the same as libobs. See [LICENSE](LICENSE). `third_party/libobs` holds headers from obs-studio under their own GPL-2.0-or-later notices. knobs ships no OBS binaries: it runs the OBS you installed.
+knobs's code is licensed under **GPL-2.0-or-later**, the same as libobs. See [LICENSE](LICENSE). `third_party/libobs` holds headers from obs-studio under their own GPL-2.0-or-later notices. knobs ships no OBS binaries: it runs the OBS you installed.
+
+The knobs name and logo are trademarks of Daniel Alyoshin. The logo files in [`assets/`](assets/) aren't under the GPL: you can share them unmodified and use them to refer to knobs, and a fork that you distribute needs its own name and icon. [TRADEMARKS.md](TRADEMARKS.md) has the details.
 
 knobs is an independent project. It isn't affiliated with or endorsed by the OBS Project.

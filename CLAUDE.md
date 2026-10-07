@@ -50,8 +50,8 @@ Don't open the mic without the user's go-ahead.
 
 ## Invariants
 - **Fidelity is the product.** Audio passes only through OBS's own filter code. No custom DSP and no "improvements".
-- **`%AppData%\obs-studio` is read-only**, as is a portable OBS's `config` folder. knobs keeps its own state in `%AppData%\knobs` and `%LocalAppData%\knobs`. Some libobs helpers write: `obs_data_create_from_json_file_safe` renames a backup over a broken file, so read files yourself and parse them with `obs_data_create_from_json`.
-- **Never load from the OBS install dir.** Load only from the shadow copy in `%LocalAppData%\knobs\runtime\<obs-version>\`. Hold `RuntimeCopyLock` from `EnsureRuntimeCopy` until `obs.dll` has loaded from the copy (`ObsHost` does). Only knobs.exe prunes the runtime folder; tests and tools don't, apart from `knobs-core --prune-runtime`.
+- **`%AppData%\obs-studio` is read-only**, as is a portable OBS's `config` folder. knobs keeps its own state in `%AppData%\knobs` and `%LocalAppData%\knobs`, or in the `data` folder of a portable copy (`AppDirs`); either way it reads OBS's settings from `%AppData%`. Some libobs helpers write: `obs_data_create_from_json_file_safe` renames a backup over a broken file, so read files yourself and parse them with `obs_data_create_from_json`.
+- **Never load from the OBS install dir.** Load only from the shadow copy in `%LocalAppData%\knobs\runtime\<obs-version>\` (`AppDirs::RuntimeBase`). Hold `RuntimeCopyLock` from `EnsureRuntimeCopy` until `obs.dll` has loaded from the copy (`ObsHost` does). Only knobs.exe prunes the runtime folder; tests and tools don't, apart from `knobs-core --prune-runtime`.
 - **No link-time libobs dependency.** Resolve exports into the function table (`KNOBS_OBS_API` in `src/runtime/obs_api.h`) with `GetProcAddress`. Add new libobs functions there. A missing export fails gracefully with a clear message.
 - **Load only `win-wasapi` and `obs-filters`.** No `obs-vst` in v1.
 - **Never ship libobs.** A from-source build is only for local debugging.
@@ -60,7 +60,8 @@ Don't open the mic without the user's go-ahead.
 - When the tested OBS version changes, re-vendor the headers for that tag and revisit the supported range in `src/runtime/obs_version.h`.
 
 ## Conventions
-- Every source file starts with `// SPDX-License-Identifier: GPL-2.0-or-later`.
+- Every source file starts with `// SPDX-License-Identifier: GPL-2.0-or-later` (`;` or `#` comments in scripts).
+- The logo files in `assets/` aren't GPL: they're all rights reserved, apart from what `TRADEMARKS.md` allows. Don't add SPDX lines to them or move them out of `assets/`.
 - The name is "knobs", all lowercase, even at the start of a sentence. It was "knOBS" until 2026-10-05. Keep it in one constant (`KNOBS_DISPLAY_NAME` in `src/app_info.h`), and don't write it out in user-facing strings; tests shouldn't depend on it either.
 
 ## Git

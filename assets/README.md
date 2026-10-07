@@ -24,3 +24,7 @@ The knob is the same everywhere: a dark body, a `#e5484d` pointer and `#e8eaee` 
 - Don't recolor, rotate or stretch the knob.
 - The wordmark is Sora: "kn" in SemiBold 600 and "obs" in Bold 700, tracked −0.055em.
 - The mark is original artwork. Where it appears next to the OBS name or logo, check the OBS Project's trademark guidelines.
+
+## License
+
+These files aren't under the GPL like the rest of knobs. They're Copyright © 2026 Daniel Alyoshin, all rights reserved, apart from what [TRADEMARKS.md](../TRADEMARKS.md) allows: sharing them unmodified with the knobs source and its official builds, and using them unmodified to refer to knobs. A fork that you distribute needs its own icon in place of `knobs.ico`.
