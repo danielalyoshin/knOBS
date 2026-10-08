@@ -20,7 +20,7 @@ ctest --preset debug          # unit tests, then smoke, harness, import and core
 
 The build puts the tray app, `knobs.exe`, in `build\x64\<config>\`. It runs the real core: unless OBS is open or something needs setting up, it opens the mic. Use `knobs-tray` to look at the tray and the first run instead.
 
-`packaging\package.ps1` packages the Release build as an installer (Inno Setup 6) and a portable zip in `build\package`. Don't test an uninstall of the real installer on this PC: it deletes `%LocalAppData%\knobs`. Build one with another `AppName` instead, such as `/DAppName=knobs-test` to Inno Setup's compiler.
+`packaging\package.ps1` packages the Release build as an installer (Inno Setup 6) and a portable zip in `build\package`. Don't test an uninstall of the real installer on this PC: it deletes `%LocalAppData%\knobs`. Build one with another `AppName` instead, such as `/DAppName=knobs-test` to Inno Setup's compiler. Without `package.ps1`'s `/DKnobsAppId`, it gets an AppId of its own, so it can't install over knobs or uninstall it.
 
 The dev tools in `build\x64\<config>\` each take `--help`:
 - `knobs-smoke`: the runtime bootstrap check. Options include `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`).

@@ -13,8 +13,18 @@
   #error Run packaging\package.ps1, which passes AppName, AppVersion, StageDir and OutputDir.
 #endif
 
+; Windows knows an install by its AppId. package.ps1 passes KnobsAppId for
+; knobs's own, which every release has. Any other build, such as one with
+; another AppName to test an uninstall, gets an AppId of its own, so it can't
+; install over knobs or uninstall it.
+#ifdef KnobsAppId
+  #define AppId "{{1FE50EC5-3715-4EE5-BD51-381BF3374BA2}"
+#else
+  #define AppId AppName
+#endif
+
 [Setup]
-AppId={{1FE50EC5-3715-4EE5-BD51-381BF3374BA2}
+AppId={#AppId}
 AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}

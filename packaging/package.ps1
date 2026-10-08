@@ -99,7 +99,8 @@ if (-not $NoInstaller) {
     }
   }
   if (-not $Iscc -or -not (Test-Path $Iscc)) { throw "Couldn't find Inno Setup 6's ISCC.exe. Install it, or pass -Iscc." }
-  $defines = @("/DAppName=$name", "/DAppVersion=$version", "/DStageDir=$stage", "/DOutputDir=$out")
+  # KnobsAppId: knobs's own AppId, which a test build without it doesn't get.
+  $defines = @("/DAppName=$name", "/DKnobsAppId", "/DAppVersion=$version", "/DStageDir=$stage", "/DOutputDir=$out")
   if ($Sign) {
     # Inno Setup signs the uninstaller and the installer with this command:
     # $q is a quote and $f the quoted file.
