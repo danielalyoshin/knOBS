@@ -608,7 +608,7 @@ void TrayApp::ShowAbout() {
   ShowMessageDialog(options_.instance,
                     {.custom_icon = icon,
                      .instruction = std::format(L"{} {}", kDisplayNameW, L"" KNOBS_VERSION),
-                     .content = std::format(L"Your OBS mic chain, without OBS. {0} runs the filters from your own "
+                     .content = std::format(L"Your OBS mic chain, in every app. {0} runs the filters from your own "
                                             L"OBS Studio install and sends your mic to a virtual cable.\n\n{0} "
                                             L"isn't affiliated with or endorsed by the OBS Project.",
                                             kDisplayNameW),
