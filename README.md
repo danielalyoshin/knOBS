@@ -1,13 +1,13 @@
 <h1 align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="assets/knobs-lockup-horizontal-light.svg">
-    <img src="assets/knobs-lockup-horizontal-dark.svg" alt="knobs" width="388">
+    <img src="assets/knobs-lockup-horizontal-dark.svg" alt="knobs" width="453">
   </picture>
 </h1>
 
 <div align="center">
 
-**Your OBS mic chain, without OBS.**
+**Your OBS mic chain, in every app.**
 
 A Windows tray app that runs the mic filter chain you tuned in OBS Studio and sends it to a virtual audio cable.<br>
 Your other apps get the same processed mic while OBS stays closed.

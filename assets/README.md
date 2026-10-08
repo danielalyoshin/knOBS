@@ -24,7 +24,7 @@ The knob is the same everywhere: a dark body, a `#e5484d` pointer and `#e8eaee` 
 - Keep clear space around the mark at least as long as its pointer. The app icon is the exception: it fills its square.
 - Don't show the mark smaller than 32 px. The app icon's smaller sizes are the exception.
 - Don't recolor, rotate or stretch the knob.
-- In the horizontal lockup, the wordmark is about 60% of the knob's height, centered on it, and starts 38 units right of the knob (decided 2026-10-07, up from 49% and 29 units).
+- In the horizontal lockup, the wordmark is about 73% of the knob's height, centered on it, and starts 66 units right of the knob, as on getknobs.app (decided 2026-10-08, up from 60%).
 - The wordmark is Sora: "kn" in SemiBold 600 and "obs" in Bold 700, tracked −0.055em.
 - The mark is original artwork. Where it appears next to the OBS name or logo, check the OBS Project's trademark guidelines.
 
