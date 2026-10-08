@@ -37,14 +37,14 @@ SetupIconFile=..\assets\knobs.ico
 UninstallDisplayIcon={app}\{#AppName}.exe
 UninstallDisplayName={#AppName}
 WizardStyle=modern
-; The lockups and the knob, from tools\render-installer-images.ps1, at each
-; display scale's size. Setup picks the one that fits, and centers the large
-; one on its own color rather than stretching it. The small one, the knob, is
-; for the uninstaller: the installer shows the lockup there (InitializeWizard).
+; The stacked lockup, from tools\render-installer-images.ps1, at each display
+; scale's size. Setup picks the one that fits, and centers it on its own color
+; rather than stretching it. The header's lockup is InitializeWizard's, so
+; there's no small image.
 WizardImageFile=..\assets\installer\wizard-202.png,..\assets\installer\wizard-269.png,..\assets\installer\wizard-336.png,..\assets\installer\wizard-403.png,..\assets\installer\wizard-430.png,..\assets\installer\wizard-498.png,..\assets\installer\wizard-534.png
 WizardImageStretch=no
 WizardImageBackColor=#e8eaee
-WizardSmallImageFile=..\assets\installer\small-58.png,..\assets\installer\small-77.png,..\assets\installer\small-97.png,..\assets\installer\small-116.png,..\assets\installer\small-124.png,..\assets\installer\small-143.png,..\assets\installer\small-159.png
+WizardSmallImageFile=
 Compression=lzma2/max
 SolidCompression=yes
 ; Setup closes a running knobs itself (PrepareToInstall).
@@ -84,11 +84,12 @@ const
   // tall, one for each display scale (tools\render-installer-images.ps1).
   HeaderHeights = '58,77,97,116,124,143,159';
 
-// Shows the lockup in the header, where Setup's small image is. Setup keeps
-// that square and picks an image by its area, so a wide one has to be put
-// there here: the smallest header image at least as tall as the header (the
-// tallest, scaled, if none is), with the square widened leftward to fit it
-// and the page's name and description narrowed to match.
+// Shows the lockup in the header, where Setup's small image goes. Setup keeps
+// that square, and would pick a WizardSmallImageFile by its area, the wrong
+// one for a wide image, so it's put there here: the smallest header image at
+// least as tall as the header (the tallest, scaled, if none is), with the
+// square widened leftward to fit it and the page's name and description
+// narrowed to match.
 procedure InitializeWizard();
 var
   Image: TBitmapImage;
@@ -110,6 +111,26 @@ begin
   Image.Width := Image.Width + Grow;
   WizardForm.PageNameLabel.Width := WizardForm.PageNameLabel.Width - Grow;
   WizardForm.PageDescriptionLabel.Width := WizardForm.PageDescriptionLabel.Width - Grow;
+end;
+
+// The uninstaller shows the app icon in its header, as tall as the lockup is
+// in the installer's. This moves it left to the lockup's margin, 24/58 of the
+// header's height (tools\render-installer-images.ps1), so their right edges
+// line up.
+procedure InitializeUninstallProgressForm();
+var
+  Image: TBitmapImage;
+  Shift: Integer;
+begin
+  Image := UninstallProgressForm.WizardSmallBitmapImage;
+  Shift := Image.Left + Image.Width - (UninstallProgressForm.MainPanel.ClientWidth -
+           MulDiv(UninstallProgressForm.MainPanel.Height, 24, 58));
+  if Shift > 0 then
+  begin
+    Image.Left := Image.Left - Shift;
+    UninstallProgressForm.PageNameLabel.Width := UninstallProgressForm.PageNameLabel.Width - Shift;
+    UninstallProgressForm.PageDescriptionLabel.Width := UninstallProgressForm.PageDescriptionLabel.Width - Shift;
+  end;
 end;
 
 // Asks a running knobs to quit, and waits up to 15 s for it. False if it's

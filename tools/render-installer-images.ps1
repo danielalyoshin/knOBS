@@ -8,14 +8,11 @@ Writes assets\installer\:
   wizard-<width>.png  the large image, on the "Completing setup" page: the
                       stacked lockup, centered on the knob's light graphite
                       (#e8eaee)
-  header-<size>.png   the installer's header image, top right on the other
-                      pages: the horizontal lockup, centered on a transparent
-                      ground as tall as the header, with a margin on its
-                      right
-  small-<size>.png    the small image, in the same place in the uninstaller:
-                      the app icon, on a transparent ground
+  header-<size>.png   the header image, top right on the other pages: the
+                      horizontal lockup, centered on a transparent ground as
+                      tall as the header, with a margin on its right
 at each size Inno Setup 6 asks for, from 100% to 250% display scaling. Setup
-picks the one that fits; the installer's code picks the header image.
+picks the wizard image that fits, and the installer's code the header image.
 
 As tools\render-icon.ps1 does: headless Edge draws each SVG once on black and
 once on white, with 8x8 device pixels to each of the image's, and each block
@@ -122,7 +119,7 @@ public static class SvgRender {
 $supersample = 8
 # Inno Setup 6's image areas at 100%, 125%, 150%, 175%, 200%, 225% and 250%.
 $wizardSizes = @(@(202, 386), @(269, 515), @(336, 643), @(403, 772), @(430, 824), @(498, 953), @(534, 1022))
-$smallSizes = @(58, 77, 97, 116, 124, 143, 159)
+$headerSizes = @(58, 77, 97, 116, 124, 143, 159)
 $panel = [System.Drawing.ColorTranslator]::FromHtml('#e8eaee')
 function Get-Aspect([string]$svg) {
     $viewBox = [regex]::Match((Get-Content -Raw $svg), 'viewBox="0 0 ([\d.]+) ([\d.]+)"')
@@ -220,22 +217,13 @@ try {
         $image.Dispose()
     }
 
-    $iconBoxes = foreach ($size in $smallSizes) { , @($size, $size) }
-    $icons = Render-Pixels "$root\assets\knobs-app-icon.svg" $iconBoxes
-    for ($i = 0; $i -lt $smallSizes.Count; $i++) {
-        $size = $smallSizes[$i]
-        $image = [SvgRender]::Compose($icons[$i], $size, $size, $size, $size, 0, 0, $null)
-        $image.Save((Join-Path $Out "small-$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
-        $image.Dispose()
-    }
-
-    $headerBoxes = foreach ($size in $smallSizes) {
+    $headerBoxes = foreach ($size in $headerSizes) {
         $h = [int][math]::Round($size * $headerLockupHeight)
         , @([int][math]::Round($h * $headerAspect), $h)
     }
     $headers = Render-Pixels $headerLockup $headerBoxes
-    for ($i = 0; $i -lt $smallSizes.Count; $i++) {
-        $size = $smallSizes[$i]
+    for ($i = 0; $i -lt $headerSizes.Count; $i++) {
+        $size = $headerSizes[$i]
         $box = $headerBoxes[$i]
         $width = $box[0] + [int][math]::Round($size * $headerMargin)
         $y = [int][math]::Round(($size - $box[1]) / 2)
@@ -243,8 +231,7 @@ try {
         $image.Save((Join-Path $Out "header-$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
         $image.Dispose()
     }
-    Write-Output ("Wrote $($wizardSizes.Count) wizard images, $($smallSizes.Count) header images and " +
-        "$($smallSizes.Count) small images to $Out.")
+    Write-Output "Wrote $($wizardSizes.Count) wizard images and $($headerSizes.Count) header images to $Out."
 } finally {
     Stop-Edge
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue
