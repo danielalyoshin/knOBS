@@ -9,6 +9,12 @@
 # ARTIFACT_SIGNING_ACCOUNT and ARTIFACT_SIGNING_PROFILE, and the secrets
 # AZURE_TENANT_ID and AZURE_CLIENT_ID. Without them, the release is unsigned,
 # with a warning; with them, a failure to sign fails the release.
+#
+# AZURE_CLIENT_ID's app registration trusts this job through a federated
+# credential. Its subject has to match the job's OIDC token exactly, and the
+# repo uses GitHub's immutable subjects, with the owner's and the repo's IDs:
+# repo:danielalyoshin@69736908/knobs@1396649945:environment:release. A rename
+# or transfer changes it, and azure/login prints the one the token carries.
 name: Release
 
 on:

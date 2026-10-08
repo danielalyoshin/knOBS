@@ -120,7 +120,7 @@ Download knobs from the [latest release](https://github.com/danielalyoshin/knobs
 - **The installer**, `knobs-<version>-setup.exe`. It installs knobs for your Windows account only, with no admin rights, adds it to the Start menu, and starts it at the end.
 - **The portable zip**, `knobs-<version>-portable.zip`. Unzip it anywhere and run `knobs.exe`. It keeps its settings and its data in a `data` folder beside the exe, and nothing in your user folders.
 
-knobs isn't code-signed yet, so Windows SmartScreen may warn the first time you run it. Choose **More info**, then **Run anyway**.
+knobs is signed by Daniel Alyoshin, through Azure Artifact Signing. Windows SmartScreen may still warn about a new release until enough people have run it. Choose **More info**, then **Run anyway**.
 
 The first run checks what it found in OBS and asks only what it needs to:
 
@@ -205,7 +205,7 @@ The build puts `knobs.exe` and the dev tools in `build\x64\Release\` (or `Debug\
 
 `packaging\package.ps1` packages the Release build as the installer and the portable zip, with their checksums, in `build\package\`. The installer needs [Inno Setup 6](https://jrsoftware.org/isinfo.php).
 
-[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) once it's set up (`packaging\sign.ps1`).
+[CI](.github/workflows/ci.yml) builds knobs, runs every test against an installed OBS Studio 32.2.2, and packages both on each push and pull request. Pushing a tag such as `v0.1.0` drafts a release with the packages ([release.yml](.github/workflows/release.yml)), signed with [Azure Artifact Signing](https://azure.microsoft.com/en-us/products/artifact-signing) (`packaging\sign.ps1`).
 
 ### Dev tools
 
