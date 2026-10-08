@@ -8,10 +8,14 @@ Writes assets\installer\:
   wizard-<width>.png  the large image, on the "Completing setup" page: the
                       stacked lockup, centered on the knob's light graphite
                       (#e8eaee)
-  small-<size>.png    the small image, top right on the other pages: the app
-                      icon, on a transparent ground
+  header-<size>.png   the installer's header image, top right on the other
+                      pages: the horizontal lockup, centered on a transparent
+                      ground as tall as the header, with a margin on its
+                      right
+  small-<size>.png    the small image, in the same place in the uninstaller:
+                      the app icon, on a transparent ground
 at each size Inno Setup 6 asks for, from 100% to 250% display scaling. Setup
-picks the one that fits.
+picks the one that fits; the installer's code picks the header image.
 
 As tools\render-icon.ps1 does: headless Edge draws each SVG once on black and
 once on white, with 8x8 device pixels to each of the image's, and each block
@@ -120,12 +124,23 @@ $supersample = 8
 $wizardSizes = @(@(202, 386), @(269, 515), @(336, 643), @(403, 772), @(430, 824), @(498, 953), @(534, 1022))
 $smallSizes = @(58, 77, 97, 116, 124, 143, 159)
 $panel = [System.Drawing.ColorTranslator]::FromHtml('#e8eaee')
+function Get-Aspect([string]$svg) {
+    $viewBox = [regex]::Match((Get-Content -Raw $svg), 'viewBox="0 0 ([\d.]+) ([\d.]+)"')
+    return [double]$viewBox.Groups[1].Value / [double]$viewBox.Groups[2].Value
+}
 # The lockup's width on the large image, and its center's height, as fractions of the image.
 $lockup = "$root\assets\knobs-lockup-stacked-dark.svg"
 $lockupWidth = 0.72
 $lockupCenter = 0.44
-$viewBox = [regex]::Match((Get-Content -Raw $lockup), 'viewBox="0 0 ([\d.]+) ([\d.]+)"')
-$lockupAspect = [double]$viewBox.Groups[1].Value / [double]$viewBox.Groups[2].Value
+$lockupAspect = Get-Aspect $lockup
+# The lockup's height in the header, and the margin on its right, as fractions
+# of the header's height: 32 and 24 pixels at 100%, so the lockup is as tall
+# as on getknobs.app's phone header and its margin as wide as the page title's
+# on the left.
+$headerLockup = "$root\assets\knobs-lockup-horizontal-dark.svg"
+$headerLockupHeight = 32 / 58
+$headerMargin = 24 / 58
+$headerAspect = Get-Aspect $headerLockup
 
 $edge = @(
     "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
@@ -213,7 +228,23 @@ try {
         $image.Save((Join-Path $Out "small-$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
         $image.Dispose()
     }
-    Write-Output "Wrote $($wizardSizes.Count) wizard images and $($smallSizes.Count) small images to $Out."
+
+    $headerBoxes = foreach ($size in $smallSizes) {
+        $h = [int][math]::Round($size * $headerLockupHeight)
+        , @([int][math]::Round($h * $headerAspect), $h)
+    }
+    $headers = Render-Pixels $headerLockup $headerBoxes
+    for ($i = 0; $i -lt $smallSizes.Count; $i++) {
+        $size = $smallSizes[$i]
+        $box = $headerBoxes[$i]
+        $width = $box[0] + [int][math]::Round($size * $headerMargin)
+        $y = [int][math]::Round(($size - $box[1]) / 2)
+        $image = [SvgRender]::Compose($headers[$i], $box[0], $box[1], $width, $size, 0, $y, $null)
+        $image.Save((Join-Path $Out "header-$size.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+        $image.Dispose()
+    }
+    Write-Output ("Wrote $($wizardSizes.Count) wizard images, $($smallSizes.Count) header images and " +
+        "$($smallSizes.Count) small images to $Out.")
 } finally {
     Stop-Edge
     Remove-Item -Recurse -Force $work -ErrorAction SilentlyContinue

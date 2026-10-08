@@ -8,7 +8,7 @@ The knob mark, the app icon and the lockups. The SVGs are the masters. The wordm
 - `knobs-lockup-horizontal-dark.svg`: mark and wordmark with dark text, for light backgrounds.
 - `knobs-lockup-horizontal-light.svg`: mark and wordmark with light text, for dark backgrounds.
 - `knobs-lockup-stacked-dark.svg` and `knobs-lockup-stacked-light.svg`: the mark above the wordmark, for tall spaces such as the installer's side panel. The wordmark is 1.3 times the knob's width, 24 units below it.
-- `installer/`: the installer's images, at each size Inno Setup asks for from 100% to 250% display scaling. `wizard-<width>.png` is the stacked lockup centered on `#e8eaee`, for the "Completing setup" page, and `small-<size>.png` the app icon on a transparent ground, top right on the other pages. `tools/render-installer-images.ps1` makes them from the SVGs, as `render-icon.ps1` makes `knobs.ico`.
+- `installer/`: the installer's images, at each size Inno Setup asks for from 100% to 250% display scaling. `wizard-<width>.png` is the stacked lockup centered on `#e8eaee`, for the "Completing setup" page. `header-<size>.png` is the horizontal lockup with dark text on a transparent ground, top right on the other pages: 32 px tall at 100%, centered on the 58 px header, with a 24 px margin on its right, the page title's inset on the left. `small-<size>.png` is the app icon on a transparent ground, in the same place in the uninstaller, which can't unpack the header images. `tools/render-installer-images.ps1` makes them from the SVGs, as `render-icon.ps1` makes `knobs.ico`.
 
 ## Colors
 

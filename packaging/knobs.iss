@@ -37,9 +37,10 @@ SetupIconFile=..\assets\knobs.ico
 UninstallDisplayIcon={app}\{#AppName}.exe
 UninstallDisplayName={#AppName}
 WizardStyle=modern
-; The knob, from tools\render-installer-images.ps1, at each display scale's
-; size. Setup picks the one that fits, and centers the large one on its own
-; color rather than stretching it.
+; The lockups and the knob, from tools\render-installer-images.ps1, at each
+; display scale's size. Setup picks the one that fits, and centers the large
+; one on its own color rather than stretching it. The small one, the knob, is
+; for the uninstaller: the installer shows the lockup there (InitializeWizard).
 WizardImageFile=..\assets\installer\wizard-202.png,..\assets\installer\wizard-269.png,..\assets\installer\wizard-336.png,..\assets\installer\wizard-403.png,..\assets\installer\wizard-430.png,..\assets\installer\wizard-498.png,..\assets\installer\wizard-534.png
 WizardImageStretch=no
 WizardImageBackColor=#e8eaee
@@ -55,6 +56,9 @@ SignedUninstaller=yes
 #endif
 
 [Files]
+; The header's lockup, for InitializeWizard. First, so it unpacks without the
+; rest.
+Source: "..\assets\installer\header-*.png"; Flags: dontcopy noencryption
 Source: "{#StageDir}\{#AppName}.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#StageDir}\NOTICE.txt"; DestDir: "{app}"; Flags: ignoreversion
@@ -76,6 +80,37 @@ const
   // The tray's window, which quits on WM_CLOSE (src/main.cpp).
   TrayWindowClass = '{#AppName}.tray';
   WM_CLOSE = $0010;
+  // The header images' heights: header-<height>.png is for a header that
+  // tall, one for each display scale (tools\render-installer-images.ps1).
+  HeaderHeights = '58,77,97,116,124,143,159';
+
+// Shows the lockup in the header, where Setup's small image is. Setup keeps
+// that square and picks an image by its area, so a wide one has to be put
+// there here: the smallest header image at least as tall as the header (the
+// tallest, scaled, if none is), with the square widened leftward to fit it
+// and the page's name and description narrowed to match.
+procedure InitializeWizard();
+var
+  Image: TBitmapImage;
+  Heights: TArrayOfString;
+  Name: String;
+  I, Grow: Integer;
+begin
+  Image := WizardForm.WizardSmallBitmapImage;
+  Heights := StringSplit(HeaderHeights, [','], stExcludeEmpty);
+  I := 0;
+  while (I < GetArrayLength(Heights) - 1) and (StrToInt(Heights[I]) < Image.Height) do
+    I := I + 1;
+  Name := 'header-' + Heights[I] + '.png';
+  ExtractTemporaryFile(Name);
+  Image.PngImage.LoadFromFile(ExpandConstant('{tmp}\') + Name);
+  Image.Stretch := True;
+  Grow := Image.PngImage.Width * Image.Height div Image.PngImage.Height - Image.Width;
+  Image.Left := Image.Left - Grow;
+  Image.Width := Image.Width + Grow;
+  WizardForm.PageNameLabel.Width := WizardForm.PageNameLabel.Width - Grow;
+  WizardForm.PageDescriptionLabel.Width := WizardForm.PageDescriptionLabel.Width - Grow;
+end;
 
 // Asks a running knobs to quit, and waits up to 15 s for it. False if it's
 // still running.
