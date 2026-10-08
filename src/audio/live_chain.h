@@ -12,7 +12,7 @@
 
 namespace knobs::audio {
 
-// The M1 stand-in for an imported chain: win-wasapi's input source for
+// A stand-in for an imported chain: win-wasapi's input source for
 // `device_id` with one gain filter, as an OBS source object (the JSON a scene
 // collection saves for each source).
 std::string MicWithGainSourceJson(std::string_view device_id, double gain_db);

@@ -22,10 +22,10 @@
 #include "tray/notices.h"
 #include "util/result.h"
 
-// The tray icon and its menu (docs/design.md, Tray and first run). It runs the
-// core and shows its state: the icon's tooltip and the menu's first line are
-// the status line, the icon's badge says whether knobs is paused or needs the
-// user, and the menu offers the fix for whatever needs the user. Notifications
+// The tray icon and its menu (docs/design.md, The tray app). It runs the core
+// and shows its state: the icon's tooltip and the menu's first line are the
+// status line, the icon's badge says whether knobs is paused or needs the user,
+// and the menu offers the fix for whatever needs the user. Notifications
 // (Notifier) say what changed, and a click on one opens its fix.
 namespace knobs::tray {
 

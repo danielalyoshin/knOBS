@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //
-// knobs-smoke: checks the M0 runtime bootstrap end to end. Finds OBS, makes
+// knobs-smoke: checks the runtime bootstrap end to end. Finds OBS, makes
 // sure the runtime copy is intact, loads obs.dll from it, starts libobs with
 // the two modules and shuts down, reporting each step.
 //

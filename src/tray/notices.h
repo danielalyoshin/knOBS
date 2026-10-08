@@ -11,13 +11,13 @@
 #include "tray/badge.h"
 #include "tray/first_run.h"
 
-// The tray's notifications as data (docs/design.md, Tray and first run): which
-// changes of the core's state get one, what it says, and what a click on it
-// opens. Each says what happened, then what knobs does or what to do. There
-// are none for a normal start, or when OBS opens or closes without changing
-// the mic. The icon's badge comes from here too, since Do Not Disturb can
-// hide the notifications. tray_app.cpp shows them as Shell_NotifyIcon
-// balloons. Text is UTF-8.
+// The tray's notifications as data (docs/design.md, Notifications and badges):
+// which changes of the core's state get one, what it says, and what a click on
+// it opens. Each says what happened, then what knobs does or what to do. There
+// are none for a normal start, or when OBS opens or closes without changing the
+// mic. The icon's badge comes from here too, since Do Not Disturb can hide the
+// notifications. tray_app.cpp shows them as Shell_NotifyIcon balloons. Text is
+// UTF-8.
 namespace knobs::tray {
 
 struct Notice {

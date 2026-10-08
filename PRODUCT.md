@@ -19,7 +19,7 @@ The job for both: tune the mic once, get that sound in every app, and stop think
 
 knobs runs the mic filter chain from the user's OBS settings and sends the result to a virtual audio cable, with no OBS process. The audio goes through the user's own installed OBS filter code.
 
-Success (docs/design.md, Success criteria): with OBS closed and knobs in the tray, the mic sounds identical to OBS in every app. A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
+Success (measured in docs/design.md, Evidence): with OBS closed and knobs in the tray, the mic sounds identical to OBS in every app. A cold boot gives a working filtered mic with zero clicks, opening OBS while knobs runs never doubles the audio, and idle use is well below OBS minimized.
 
 ## Positioning
 
@@ -39,7 +39,7 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 - No custom DSP and no "improvements". No filter editing in v1, since users tune in OBS. No VST filters in v1. Windows only in v1.
 - Plain Win32 UI with no UI framework. A small exe that ships no libobs. Target: under 1% CPU and a small memory footprint.
 - Terms: mic, filter chain, virtual cable (or cable), OBS profile, scene collection, monitoring device.
-- The tray menu, first run and tray icon are designed in docs/design.md (Tray and first run).
+- The tray menu, first run and tray icon are designed in docs/design.md (The tray app).
 - Distribution: an installer (for the current user, no admin rights) and a portable zip that keeps its data beside the exe, from GitHub releases. Releases are signed with Azure Artifact Signing once it's set up; until then SmartScreen warns on first run.
 
 ## Brand Commitments
@@ -55,9 +55,9 @@ knobs gives OBS's exact mic sound without OBS. It loads the filter binaries from
 
 ## Evidence on Hand
 
-- knobs's output is bit-identical to OBS's on test signals and on a recording of real voice (docs/design.md, M2 findings).
-- Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (M1, Audient iD4).
-- On real hardware (docs/design.md, M3 test on real hardware): running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
+- knobs's output is bit-identical to OBS's on test signals and on a recording of real voice (docs/design.md, Same output as OBS).
+- Mic to cable: 88.1 ms in knobs, 87.7 ms in OBS, on the same cable input (Audient iD4; docs/design.md, Mic-to-cable latency).
+- On real hardware (docs/design.md, On real hardware): running, knobs used 0.72% of a core and 36 MB, against OBS minimized at 5.64% and 469 MB. After a cold boot, the filtered mic was on the cable 9.5 s after signing in, with nothing clicked.
 - [obs-studio#12650](https://github.com/obsproject/obs-studio/issues/12650): since OBS 32.0 the Safe Mode prompt blocks OBS from running unattended as a background mic processor, which is this product's use case.
 - The logo, app icon and lockups in `assets/`.
 - Pictures of the tray menu, first run, notifications and icon: `knobs-tray --screenshot` and `--icons` take them on its fake core, whose state is made up but realistic.

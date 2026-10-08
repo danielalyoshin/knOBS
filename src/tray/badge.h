@@ -7,10 +7,10 @@
 #include <optional>
 #include <vector>
 
-// The tray icon's badges (docs/design.md, Tray and first run): the knob alone
-// while knobs runs, a pause badge while it's paused, and a "!" while the cable
-// gets no mic and that needs the user. Notifications can be hidden (Do Not
-// Disturb), so the icon shows the state too. They're discs in the logo's
+// The tray icon's badges (docs/design.md, Notifications and badges): the knob
+// alone while knobs runs, a pause badge while it's paused, and a "!" while the
+// cable gets no mic and that needs the user. Notifications can be hidden (Do
+// Not Disturb), so the icon shows the state too. They're discs in the logo's
 // colors: a white "!" on its red, and white pause bars on the knob's graphite,
 // the same on a light and a dark taskbar. The badge is drawn over the icon's
 // bottom-right corner, 7/16 of its size, with a clear ring that lets the

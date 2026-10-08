@@ -18,8 +18,8 @@ struct Endpoints {
   std::vector<AudioDevice> mics;     // Recording.
   std::vector<AudioDevice> outputs;  // Playback.
   // The default communications recording device, which win-wasapi records from
-  // for a mic set to "default" (docs/design.md, M1 findings). Empty if there's
-  // none.
+  // for a mic set to "default" (docs/design.md, Mic candidates). Empty if
+  // there's none.
   std::string default_mic;
 
   friend bool operator==(const Endpoints&, const Endpoints&) = default;

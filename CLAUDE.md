@@ -1,8 +1,8 @@
 # knobs
 
-Windows tray app that runs the user's OBS mic filter chain through their installed libobs and sends the result to a virtual audio cable, with no OBS process. The design and its rationale, with what was measured, are in [docs/design.md](docs/design.md). Read it before non-trivial work, and update it when a decision changes. It describes what's true now: git history has how it got there.
+Windows tray app that runs the user's OBS mic filter chain through their installed libobs and sends the result to a virtual audio cable, with no OBS process. The design and its rationale, with the evidence behind it, are in [docs/design.md](docs/design.md). Read it before non-trivial work, and update it when the design changes. It describes what's true now, in the present tense, with no dates, milestones or decision history: git history has how it got there.
 
-Status: knobs works end to end against OBS 32.2.2. Its output is bit-identical to OBS's, on test signals and real voice, its mic-to-cable latency matches OBS's, and knobs.exe met the success criteria on real hardware (docs/design.md). The core restarts libobs's monitor in silence so the delay to the cable can't creep up (docs/design.md, Long-run latency). Shipping is under way: the installer, the portable zip, the logo's carve-out from the GPL, CI, and signed releases once Azure Artifact Signing is set up. Next: the first release, the forum posts, and OBS 33.0 support once 33.0 is released. An hours-long latency test on real hardware is optional.
+Status: knobs works end to end against OBS 32.2.2. Its output is bit-identical to OBS's, on test signals and real voice, its mic-to-cable latency matches OBS's, and knobs.exe met its success criteria (PRODUCT.md) on real hardware (docs/design.md, Evidence). The core restarts libobs's monitor in silence so the delay to the cable can't creep up (docs/design.md, Keeping the delay down). Shipping is under way: the installer, the portable zip, the logo's carve-out from the GPL, CI, and signed releases once Azure Artifact Signing is set up. Next: the first release, the forum posts, and OBS 33.0 support once 33.0 is released. An hours-long latency test on real hardware is optional.
 
 ## Stack
 - C++20, CMake, MSVC (VS 2022 or newer; the preset uses the newest installed Visual Studio), x64 only, static CRT.
@@ -23,7 +23,7 @@ The build puts the tray app, `knobs.exe`, in `build\x64\<config>\`. It runs the 
 `packaging\package.ps1` packages the Release build as an installer (Inno Setup 6) and a portable zip in `build\package`. Don't test an uninstall of the real installer on this PC: it deletes `%LocalAppData%\knobs`. Build one with another `AppName` instead, such as `/DAppName=knobs-test` to Inno Setup's compiler.
 
 The dev tools in `build\x64\<config>\` each take `--help`:
-- `knobs-smoke`: the M0 bootstrap check. Options include `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`).
+- `knobs-smoke`: the runtime bootstrap check. Options include `--video dummy`, `--list-files`, `--obs-dir`, and opt-in mic capture (`--capture-seconds`).
 - `knobs-import`: imports the mic from OBS's active profile and scene collection and reports each step: settings found, mics, pre-flight warnings, the chain libobs loads. `--obs-config` points it at another OBS settings folder, `--pick` chooses among several mics, `--save` writes the source object. It opens no audio devices.
 - `knobs-harness`: pushes a WAV (or a built-in test signal) through a filter chain offline and checks that runs are bit-identical. `--import` uses the imported mic's chain; `--source <json>` takes an OBS source object; `--out` writes the result. It opens no audio devices.
 - `knobs-compare`: runs the same input through the imported chain in knobs and in OBS itself, and measures the difference. OBS runs from a portable copy of the install in `%LocalAppData%\knobs\compare`, minimized to the tray, with settings of its own. It opens no audio device and leaves `%AppData%\obs-studio` alone. `--obs-wav` compares with an existing OBS recording instead.
@@ -45,7 +45,7 @@ Don't open the mic without the user's go-ahead.
 - `tests/`: unit tests, which don't need OBS (`core_tests.cpp` runs the core on a fake backend, `tray_tests.cpp` checks the menu, the settings file, the Run entry on a scratch key, the lock, and starting OBS with a stand-in, `first_run_tests.cpp` the first run's pages and moves, and `notices_tests.cpp` the notifications and badges on knobs-tray's fake core), and the import and core tests, which run `knobs-import` and `knobs-core` on the made-up OBS settings in `tests/fixtures/obs-config`.
 - `packaging/`: the installer's Inno Setup script, the text files that ship in each package, `package.ps1`, which builds both packages, and `sign.ps1`, which signs with Azure Artifact Signing (set up in the `release` environment that `release.yml` uses).
 - `.github/workflows/`: CI (`ci.yml`, which calls `build.yml`: build, every test against an installed OBS, packages) and `release.yml`, which drafts a release from a `v<version>` tag.
-- `docs/design.md`: how knobs works and why, with what was measured.
+- `docs/design.md`: how knobs is designed and why, with the evidence behind it.
 - `third_party/libobs/`: vendored libobs headers (declarations only). Don't edit them.
 - `assets/`: the logo. The SVGs are the masters, and `knobs.ico` is the app icon, built into `knobs.exe`: the knob alone, with no tile. `assets/README.md` has the colors and usage rules.
 - `PRODUCT.md`: who knobs is for, its voice and brand commitments. Read it before UI or copy work.

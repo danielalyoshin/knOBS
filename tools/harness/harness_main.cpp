@@ -83,7 +83,7 @@ bit-identical.
   --source <file.json>     The chain, as an OBS source object (one entry of a scene
                            collection's "sources"), used the same way.
   --chain coverage|gain    A built-in chain instead: every obs-filters audio filter
-                           (default), or {}'s M1 chain, one gain filter at 0 dB.
+                           (default), or one gain filter at 0 dB.
   --out <file.wav>         Write the output: 32-bit float at the chain's sample rate
                            and channels. It's what the filters output, before the
                            source's volume, which libobs applies afterwards (in the
@@ -97,7 +97,7 @@ bit-identical.
 After the input, {} s of silence is pushed so buffered filters flush, and the
 output keeps it.
 )",
-                     kImportUsage, kDisplayName, kMaxRuns, kTailSeconds);
+                     kImportUsage, kMaxRuns, kTailSeconds);
 }
 
 struct Options {

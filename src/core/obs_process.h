@@ -28,8 +28,8 @@ struct ObsProcess {
   unsigned long session = 0;  // Its Windows session.
 };
 
-// Tells whether OBS is running in this Windows session, cheaply enough to
-// ask every second. Two signals (docs/design.md, M3 findings):
+// Tells whether OBS is running in this Windows session, cheaply enough to ask
+// every second. Two signals (docs/design.md, Following OBS):
 //  - OBS creates a named mutex as soon as it starts, before its window or any
 //    module, and holds it until it has saved its settings
 //    (frontend/obs-main.cpp, CheckIfAlreadyRunning). The name is the

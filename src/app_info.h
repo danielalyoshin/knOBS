@@ -6,9 +6,10 @@
 #endif
 
 // The display name: "knobs", all lowercase (it was "knOBS" until 2026-10-05).
-// This is its only definition, in case it changes again (docs/design.md, The
-// name). It also names knobs's %AppData% and %LocalAppData% folders; Windows
-// paths are case-insensitive, so a rename that only changes case keeps them.
+// This is its only definition, in case it changes again (docs/design.md,
+// Overview). It also names knobs's %AppData% and %LocalAppData% folders;
+// Windows paths are case-insensitive, so a rename that only changes case keeps
+// them.
 #define KNOBS_DISPLAY_NAME "knobs"
 
 // The resource compiler reads this file too, for the name.

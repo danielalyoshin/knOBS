@@ -52,7 +52,7 @@ knobs runs OBS's own filter code, from your OBS install, with your OBS settings.
 | Threads | 7–9 | 90–98 |
 | GPU | None | 0.05% |
 
-<sub>Measured on one PC (Core Ultra 7 265K) with OBS 32.2.2, an Audient iD4 and VB-Cable. [docs/design.md](docs/design.md#m3-test-on-real-hardware-obs-3222) has the method.</sub>
+<sub>Measured on one PC (Core Ultra 7 265K) with OBS 32.2.2, an Audient iD4 and VB-Cable. [docs/design.md](docs/design.md#on-real-hardware) has the method.</sub>
 
 ## How it works
 
@@ -234,10 +234,10 @@ Most of them open no audio device. `knobs-smoke --capture-seconds` opens the mic
 | `src/tray` | The tray app: menu, first run, notifications and settings |
 | `tools/` | The dev tools |
 | `packaging/` | The installer's script, the files that ship in each package, and the script that builds both |
-| `docs/` | The design, and what was measured and why |
+| `docs/` | The design, and the evidence behind it |
 | `tests/` | Unit tests, and the import and core tests on made-up OBS settings |
 
-[docs/design.md](docs/design.md) has the design, and what was measured and why.
+[docs/design.md](docs/design.md) describes how knobs is designed and why, with the measurements behind it.
 
 ## Contributing
 

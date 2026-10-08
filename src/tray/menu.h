@@ -10,8 +10,8 @@
 #include "core/backend.h"
 #include "core/state.h"
 
-// The tray menu as data (docs/design.md, Tray and first run): what it says and
-// offers for a snapshot of the core. tray_app.cpp turns it into a native
+// The tray menu as data (docs/design.md, Status line and menu): what it says
+// and offers for a snapshot of the core. tray_app.cpp turns it into a native
 // menu. Text is UTF-8 menu text: "&" marks the key that picks an item, so a
 // name's own "&" is doubled.
 namespace knobs::tray {

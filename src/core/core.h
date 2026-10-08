@@ -30,7 +30,7 @@ struct CoreOptions {
   // Default: the same ObsWatch's; none when obs_running is given without it.
   std::function<std::vector<OtherObs>()> other_obs;
   // How often to ask. OBS takes more than a second and a half from starting to
-  // loading its audio sources (docs/design.md, M3 findings), so a second is
+  // loading its audio sources (docs/design.md, Following OBS), so a second is
   // soon enough to make way for it.
   std::chrono::milliseconds obs_poll{1000};
   // Listen for audio devices coming and going (audio::DeviceWatch).
